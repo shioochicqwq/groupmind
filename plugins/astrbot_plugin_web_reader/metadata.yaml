@@ -1,0 +1,4 @@
+name: astrbot_plugin_web_reader
+desc: 本地读取网页正文和链接（带 SSRF 防护），让模型能顺着网站链接找文章。
+author: qqbot
+version: 0.1.0

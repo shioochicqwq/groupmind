@@ -48,7 +48,8 @@ AstrBot 已经注册但**按配置激活**的工具（详见 WebUI → 工具 �
 
 | 场景 | 工具 | 激活条件 |
 |---|---|---|
-| 联网搜索 | `web_search_deepseek` / `deepseek_fetch_web_page` | `provider_settings.web_search=true` 且 `websearch_provider=deepseek`（已启用，复用 DeepSeek key） |
+| 读网页正文/链接 | `web_reader`（本项目插件） | 默认可用；返回正文 + 页面链接，带 SSRF 防护 |
+| 联网搜索 | `web_search_deepseek` / `deepseek_fetch_web_page` | `provider_settings.web_search=true` 且 `websearch_provider=deepseek` |
 | 群聊历史 | `get_group_message_history` | 默认已激活 |
 | 主动发消息/媒体 | `send_message_to_user` | OneBot 平台支持主动消息（已激活） |
 | 知识库 | `astr_kb_search` | 需建知识库 |

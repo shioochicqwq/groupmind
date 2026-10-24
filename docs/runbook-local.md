@@ -148,6 +148,23 @@ python scripts\smoke_llm.py --provider deepseek --no-stream --message "帮我查
   # WebChat 里发：读取 D:\qqbot\data\temp\test.txt，暗号是什么
   ```
 
+## 网页读取
+
+- 工具：`web_reader`（本项目插件，本地抓取，返回正文+页面链接）；`web_search_deepseek` 负责搜索；
+  DeepSeek 的 `deepseek_fetch_web_page` 保留为 fallback。
+- 验证：
+
+  ```powershell
+  # WebChat 或 QQ 私聊里发：
+  # 帮我看看 https://whatasiger.xyz/carrier_wave/ 这个页面写了什么
+  # 再看看 https://whatasiger.xyz/ 里有什么文章，挑一篇讲讲
+  ```
+
+- 行为：首页/目录页会返回链接列表，模型可挑文章再读；长文可用 `offset` 续读；
+  读不到时允许模型自然推脱（网不好/等会儿），但不能编造。
+- 限制：JS 渲染站、登录墙、强反爬页面可能拿不到正文；此时可换链接或改用第三方 reader（D-017）。
+- 安全：`web_reader` 只允许 http/https，拒绝 localhost/内网/私有 IP（含重定向逐跳校验）。
+
 ## 掉线 / 漏消息恢复
 
 - 现象：NapCat 日志出现 `[KickedOffLine] 你的账号当前登录已失效`，端口 3000 消失、bot 不回消息。

@@ -289,3 +289,34 @@
   按群配不同模型/上下文。
 - **风险**：ICL 降低可能影响接梗；需群聊实测回归。
 - **验证**：`/mb_status` 分项、`context_report.py` 输出、健康检查。
+
+## D-017 网页读取：自研 `web_reader` 插件（本地抓取 + 链接导航 + SSRF 防护）
+
+- **日期**：2026-10-24
+- **背景**：用户反馈模型「看网页很吃力，没读到想让它读的东西」。实测定位：
+  - DeepSeek `fetch` 抓 `whatasiger.xyz` 首页只返回 130 字标题串、**不带任何链接**；
+    抓 `/carrier_wave/` 只返回 344 字章节列表、也无链接；抓单篇文章能返回正文但混入 UI/评论；
+  - `site:whatasiger.xyz` 搜索 **0 条结果**（个人小站未被收录）；
+  - bot 对「看看这个网站」连续调 5 次 fetch 全 504 超时，最后只说「那我再瞅瞅」；
+  - 本地 Python + BeautifulSoup 抓同一首页：**能拿到 10 篇文章链接**、文章正文 1474 字。
+- **决策**：新增自研插件 `plugins/astrbot_plugin_web_reader`（仓库源码，安装到 data/plugins）：
+  - 工具 `web_reader(url, offset, limit)`：本地 `requests` 抓 HTML → BeautifulSoup 提取标题/正文/全部链接；
+    返回正文（可分段续读）+ 链接列表，模型可「首页 → 挑文章 → 读正文」；
+  - SSRF 防护：仅 http/https，拒绝账号密码 URL；解析并拦截 localhost/私有/回环/链路本地/保留地址；
+    手动跟随重定向并逐跳校验；限制响应大小（2.5MB）、超时、重定向次数；
+  - 权限：**所有人可用**（用户决定）；失败时模型可自然推脱（网不好/等会儿），但不许编造；
+  - `web_search_deepseek` 保留做搜索入口，`deepseek_fetch_web_page` 保留为 fallback。
+- **理由**：根因是「没有链接 + 黑盒抽取 + 超时」；本地抓取能同时解决链接发现与内容获取，
+  无需外部 key；属插件层扩展（D-002）。
+- **放弃**：只改 prompt（解决不了链接/超时）；第三方 reader API（需 key/费用，JS 站后续再议）；
+  无头浏览器（内存/依赖重，VPS 不现实）。
+- **风险 / 限制**：
+  - JS 渲染站、登录墙、强反爬页面仍可能拿不到正文；需要时再上第三方 reader（D 方案）；
+  - 所有人群聊可用 → 抓取来源需遵守站点条款；已做 SSRF 防护，后续可加域名白名单/频率限制；
+  - 工具声明增加少量 token（/mb_status 可看）；新增外部抓取行为，注意日志与隐私。
+- **验证**：
+  - 单元测试：`reader.validate_url` 拦截 `http://127.0.0.1`、`http://10.0.0.1`、`http://169.254.169.254`、`file://`；
+  - 提取：首页 341 字 + 45 链接；文章 1474 字，`offset=600` 续读正常；
+  - AstrBot WebChat 实测：「看看 carrier_wave 页面」能说清 18 篇目录；「看看网站挑一篇讲讲」
+    能选中《Q君与世界的外侧》并概括内容（约四万字长文，模型自行分段读）。
+- **代码位置**：`plugins/astrbot_plugin_web_reader/`、`skills/web-lookup/SKILL.md`、`scripts/install_plugin.py`。

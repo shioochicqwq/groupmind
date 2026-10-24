@@ -60,6 +60,7 @@ QQ 小号 ⇄ NapCat 4.18.41（NTQQ 协议端，OneBot v11）
 - [x] **文件工具（A-12）**：`computer_use_runtime=local` + workspace/禁执行；WebChat 实测读取 `data/temp` 文件成功，读 `D:\qqbot\PROJECT.md` 被拒；Skill 因此能真正读取 `SKILL.md`
 - [x] **Token 策略（A-13）**：ICL 200→100；memory_beyond 0.70 压缩 + gemini-flash 摘要；`context_report.py` 基线；实测单轮固定开销 ~7.8k（固定 ~3.7k + 工具声明 ~4.1k，缓存命中 ~7k）；`skills_like` 无收益已回退
 - [x] **Skill 教学/人味（A-13）**：[skill-tutorial.md](docs/skill-tutorial.md)、[corpus-and-style.md](docs/corpus-and-style.md)、`skills/style-humanizer` 已安装
+- [x] **网页读取（A-14）**：自研 `web_reader` 插件（本地抓取正文+链接、SSRF 防护）；实测能顺着 whatasiger.xyz 首页链接挑文章并概括长文（DeepSeek fetch 首页只有 130 字且无链接，已降为 fallback）
 
 ## 4. 进行中 / 待验证
 
@@ -84,6 +85,7 @@ QQ 小号 ⇄ NapCat 4.18.41（NTQQ 协议端，OneBot v11）
 | 记忆数据 | `data/plugin_data/astrbot_plugin_memory_beyond/memories/`（session/people/global） |
 | 记忆插件配置 | `data/config/astrbot_plugin_memory_beyond_config.json` |
 | 文件工具 | `computer_use_runtime=local`，workspace 权限、禁执行；附件落在 `data/temp` |
+| 网页读取 | 自研插件 `web_reader`（`plugins/astrbot_plugin_web_reader`）：本地抓取正文+链接，SSRF 防护 |
 | 外部插件清单 | [docs/external-plugins.md](docs/external-plugins.md) |
 | LLM Key | 本地 `.env` 的 `DEEPSEEK_API_KEY` / `MULTI_API_KEY`（gitignored） |
 
@@ -139,6 +141,8 @@ Token 策略与实测见 D-016；外部插件版本见 [docs/external-plugins.md
 - **单轮固定开销偏高（实测 ~7.8k tokens）**：固定开销 ~3.7k + 工具声明 ~4.1k（本地文件/执行工具 schema 较大）；
   DeepSeek 有 prompt cache 命中（/mb_status 显示 ~7k 缓存），实际成本低于全价。后续可考虑自定义只读文件工具替代 local runtime。
 - **memory_beyond 较新**（4 stars，v1.3.7）：接管压缩/身份标注，升级前必须备份并看 CHANGELOG；人物记忆跨群可见（隐私）。
+- **网页读取限制（A-14）**：`web_reader` 对静态站效果好；JS 渲染站/登录墙/强反爬拿不到正文，需要时再评估第三方 reader（D-017）；
+  所有人群聊可用，已做 SSRF 防护，后续可加域名白名单/频率限制。
 - **账号被踢下线会漏消息**：2026-10-24 18:29 example 被 QQ 踢下线，离线期间消息不进 AstrBot；
   重登后用 NapCat `get_friend_msg_history` 拉取并手动补回（已补回两条）。小号勿多端同时登录。
 - 图片 caption 会额外消耗视觉模型 token；主动插话仍关闭，等测试群。
@@ -252,3 +256,13 @@ Token 策略与实测见 D-016；外部插件版本见 [docs/external-plugins.md
 - 新增 [skill-tutorial.md](docs/skill-tutorial.md)、[corpus-and-style.md](docs/corpus-and-style.md)、
   [external-plugins.md](docs/external-plugins.md)、`skills/style-humanizer`；
 - 健康检查扩展：记忆插件/文件工具/记忆工具/记忆目录/上下文配置/runtime 检查，全 PASS。
+
+### A-14（2026-10-24）网页读取：自研 web_reader 插件
+
+- 定位「看网页吃力」根因：DeepSeek fetch 首页仅 130 字且**无链接**、目录页无链接、搜索小站 0 结果、fetch 多次 504；
+- 新增 `plugins/astrbot_plugin_web_reader`：本地 requests+BeautifulSoup 抓正文与链接，支持 offset 续读；
+  SSRF 防护（仅 http/https、禁 localhost/内网/私有 IP、重定向逐跳校验）；所有人群聊可用；
+- `skills/web-lookup` 改为优先 `web_reader`：首页链接→挑文章→读正文；失败可自然推脱但不编造；
+- 实测：首页 341 字+45 链接、文章 1474 字可续读；WebChat 能选中《Q君与世界的外侧》并概括约四万字长文；
+- `web_search_deepseek` 保留搜索，`deepseek_fetch_web_page` 降为 fallback；健康检查新增 web_reader 检查；
+- 已知限制：JS 渲染/登录墙/强反爬站仍可能读不到，需要时再上第三方 reader（D-017）。

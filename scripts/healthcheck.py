@@ -151,6 +151,11 @@ def main() -> int:
                     "memory_write" in tool_names and "memory_search" in tool_names,
                     "memory_write/memory_search registered",
                 )
+                record(
+                    "网页读取工具",
+                    "web_reader" in tool_names,
+                    "web_reader registered",
+                )
             except Exception as exc:  # noqa: BLE001
                 record("文件/记忆工具", False, f"{exc.__class__.__name__}: {exc}")
 
