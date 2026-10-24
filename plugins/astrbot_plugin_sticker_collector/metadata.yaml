@@ -1,0 +1,4 @@
+name: astrbot_plugin_sticker_collector
+desc: 只采集表情包到本地数据集（不发送、无 LLM 工具），供标注/评估/后续理解使用。
+author: qqbot
+version: 0.1.0

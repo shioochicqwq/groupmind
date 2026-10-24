@@ -135,8 +135,20 @@ def main() -> int:
                     any("memory_beyond" in str(n) for n in names),
                     f"{len(names)} plugins loaded",
                 )
+                record(
+                    "表情包采集插件",
+                    any("sticker_collector" in str(n) for n in names),
+                    "sticker_collector loaded" if any("sticker_collector" in str(n) for n in names) else "missing",
+                )
             except Exception as exc:  # noqa: BLE001
                 record("记忆插件 memory_beyond", False, f"{exc.__class__.__name__}: {exc}")
+
+            sticker_dir = ROOT / "data" / "sticker_dataset"
+            record(
+                "表情包数据集",
+                sticker_dir.is_dir(),
+                f"{len(list(sticker_dir.glob('*')))} entries" if sticker_dir.is_dir() else "missing",
+            )
 
             try:
                 tools = http_json(f"{args.dashboard}/api/v1/tools", token=token)["data"]

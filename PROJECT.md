@@ -61,6 +61,7 @@ QQ 小号 ⇄ NapCat 4.18.41（NTQQ 协议端，OneBot v11）
 - [x] **Token 策略（A-13）**：ICL 200→100；memory_beyond 0.70 压缩 + gemini-flash 摘要；`context_report.py` 基线；实测单轮固定开销 ~7.8k（固定 ~3.7k + 工具声明 ~4.1k，缓存命中 ~7k）；`skills_like` 无收益已回退
 - [x] **Skill 教学/人味（A-13）**：[skill-tutorial.md](docs/skill-tutorial.md)、[corpus-and-style.md](docs/corpus-and-style.md)、`skills/style-humanizer` 已安装
 - [x] **网页读取（A-14）**：自研 `web_reader` 插件（本地抓取正文+链接、SSRF 防护）；实测能顺着 whatasiger.xyz 首页链接挑文章并概括长文（DeepSeek fetch 首页只有 130 字且无链接，已降为 fallback）
+- [x] **表情包数据集（A-15）**：自研只采集插件（无发送/无 LLM 工具）+ `data/sticker_dataset` + 标注/统计/评测脚本；示例图已跑通标注（委屈/生气）；**不发送表情包**
 
 ## 4. 进行中 / 待验证
 
@@ -86,6 +87,7 @@ QQ 小号 ⇄ NapCat 4.18.41（NTQQ 协议端，OneBot v11）
 | 记忆插件配置 | `data/config/astrbot_plugin_memory_beyond_config.json` |
 | 文件工具 | `computer_use_runtime=local`，workspace 权限、禁执行；附件落在 `data/temp` |
 | 网页读取 | 自研插件 `web_reader`（`plugins/astrbot_plugin_web_reader`）：本地抓取正文+链接，SSRF 防护 |
+| 表情包数据集 | `data/sticker_dataset/`（inbox/images/labels.jsonl，gitignored）；采集插件 `plugins/astrbot_plugin_sticker_collector` |
 | 外部插件清单 | [docs/external-plugins.md](docs/external-plugins.md) |
 | LLM Key | 本地 `.env` 的 `DEEPSEEK_API_KEY` / `MULTI_API_KEY`（gitignored） |
 
@@ -143,6 +145,8 @@ Token 策略与实测见 D-016；外部插件版本见 [docs/external-plugins.md
 - **memory_beyond 较新**（4 stars，v1.3.7）：接管压缩/身份标注，升级前必须备份并看 CHANGELOG；人物记忆跨群可见（隐私）。
 - **网页读取限制（A-14）**：`web_reader` 对静态站效果好；JS 渲染站/登录墙/强反爬拿不到正文，需要时再评估第三方 reader（D-017）；
   所有人群聊可用，已做 SSRF 防护，后续可加域名白名单/频率限制。
+- **表情包数据集限制（A-15）**：只采集不发送；少数 `mface` 段会被 AstrBot 跳过采集不到；标注依赖 VLM 成本，需人工复核；
+  群友表情包版权/隐私仅本地保存（ID 哈希、不公开）。
 - **账号被踢下线会漏消息**：2026-10-24 18:29 example 被 QQ 踢下线，离线期间消息不进 AstrBot；
   重登后用 NapCat `get_friend_msg_history` 拉取并手动补回（已补回两条）。小号勿多端同时登录。
 - 图片 caption 会额外消耗视觉模型 token；主动插话仍关闭，等测试群。
@@ -154,7 +158,9 @@ Token 策略与实测见 D-016；外部插件版本见 [docs/external-plugins.md
    - 支持用户自写 Skill：[skill-tutorial.md](docs/skill-tutorial.md) + [skills-dev.md](docs/skills-dev.md) + `install_skill.py`；
    - 人味：按 [corpus-and-style.md](docs/corpus-and-style.md) 建评测集 + few-shot，再迭代 [persona-eval.md](docs/persona-eval.md)。
 2. **QQ 文件附件实测**：用户发 `.txt/.pdf/.docx` 验证「总结这个文件」（机制已在 WebChat 用 `data/temp` 文件验证）。
-3. 群聊验收：等有合适的测试群后，把群号填入 `active_reply.whitelist` 并开启 `active_reply.enable`，
+3. **表情包数据集验收**：用户在 QQ 群/私聊发几张表情包，确认采集器入库；再跑标注/复核/评测
+   （[sticker-dataset.md](docs/sticker-dataset.md)）。**注意：当前不发送表情包**。
+4. 群聊验收：等有合适的测试群后，把群号填入 `active_reply.whitelist` 并开启 `active_reply.enable`，
    按 [group-chat-tuning.md](docs/group-chat-tuning.md) 调参。
 4. VPS 部署（暂缓）：按 [deploy/linux/native/README.md](deploy/linux/native/README.md) 与
    [migration-vps.md](docs/migration-vps.md) 执行；海外 VPS 注意 QQ 风控与内存上限（D-011）。
@@ -266,3 +272,14 @@ Token 策略与实测见 D-016；外部插件版本见 [docs/external-plugins.md
 - 实测：首页 341 字+45 链接、文章 1474 字可续读；WebChat 能选中《Q君与世界的外侧》并概括约四万字长文；
 - `web_search_deepseek` 保留搜索，`deepseek_fetch_web_page` 降为 fallback；健康检查新增 web_reader 检查；
 - 已知限制：JS 渲染/登录墙/强反爬站仍可能读不到，需要时再上第三方 reader（D-017）。
+
+### A-15（2026-10-24）表情包数据集：只采集、不发送
+
+- 用户决定：**暂不发表情包**，但收集/整理表情包数据集（AI 理解表情包能力差）；
+- 新增 `plugins/astrbot_plugin_sticker_collector`：监听 raw OneBot image 段（sub_type/summary）采集候选、
+  手动 `/sticker add`、`/sticker status`；**无发送工具、不发消息**；
+- 数据集 `data/sticker_dataset/`（inbox/images/rejected/labels.jsonl/review.csv/stats.json），sha256 去重、ID 哈希；
+- 新增标注（gemini 视觉 + taxonomy）、统计/复核、generic vs sticker-aware 评测脚本；
+- `image_caption_prompt` 改为表情包感知；人设要求理解表情包但不发送；
+- 验证：示例图标注出「委屈/生气/初音未来」，report/eval 可运行；插件加载、数据集目录、healthcheck 正常；
+- 已知限制：`mface` 段可能被 AstrBot 跳过；标注需人工复核；隐私仅本地。

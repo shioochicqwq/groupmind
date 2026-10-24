@@ -148,6 +148,23 @@ python scripts\smoke_llm.py --provider deepseek --no-stream --message "帮我查
   # WebChat 里发：读取 D:\qqbot\data\temp\test.txt，暗号是什么
   ```
 
+## 表情包数据集（只采集，不发送）
+
+```powershell
+# 私聊/群聊里发表情包（插件自动采集候选）；管理员可引用图片发：
+/sticker add
+/sticker status
+
+# 标注 + 统计/复核 + 评测
+python scripts\label_sticker_dataset.py --limit 20
+python scripts\sticker_dataset_report.py --review-csv
+python scripts\eval_sticker_understanding.py --limit 10
+```
+
+- 数据在 `data/sticker_dataset/`（gitignored）；格式/标注规范见 [sticker-dataset.md](sticker-dataset.md)。
+- 插件无发送工具，模型不会发表情包；普通照片默认不收，只收 `sub_type=1`/`[动画表情]`/GIF。
+- 不装 stealer 等带发送功能的插件（D-018）。
+
 ## 网页读取
 
 - 工具：`web_reader`（本项目插件，本地抓取，返回正文+页面链接）；`web_search_deepseek` 负责搜索；

@@ -320,3 +320,35 @@
   - AstrBot WebChat 实测：「看看 carrier_wave 页面」能说清 18 篇目录；「看看网站挑一篇讲讲」
     能选中《Q君与世界的外侧》并概括内容（约四万字长文，模型自行分段读）。
 - **代码位置**：`plugins/astrbot_plugin_web_reader/`、`skills/web-lookup/SKILL.md`、`scripts/install_plugin.py`。
+
+## D-018 表情包：只收集/标注数据集，不发送（用户决定）
+
+- **日期**：2026-10-24
+- **背景**：用户希望处理群聊表情包，但明确「暂时让模型不发表情包」；真正需求是**收集表情包数据集并整理**，
+  因为 AI 对表情包的理解很差（通用 image caption 只描述画面，不解释梗/情绪/文字/用法）。
+- **调查**：
+  - 收：NapCat 把 QQ 表情包以 `image` 消息段上报（子类型/`[动画表情]`），AstrBot 当图片处理；已启用
+    `gemini-3.8-flash` caption；少数 `mface` 段会被 AstrBot 适配器跳过；
+  - 发：`send_message_to_user` 可发图片但仅限 workspace/temp；要发表情包需图库+工具或 QQ 原生 mface
+    （需 emoji_id/package_id/key，NapCat 无导出收藏表情接口）；
+  - 生态：`astrbot_plugin_stealer`（AGPL，76★，活跃）能偷图+分类+按情绪自动发+LLM 工具，但自带发送能力；
+    `smart_imagechat_hub`（GPL，35★）更重；两者都不适合「只收集不发送」。
+- **决策**：自研 `plugins/astrbot_plugin_sticker_collector`（只采集，无 LLM 工具、无发送）：
+  - 从 raw OneBot image 段读 `sub_type/summary` 判定候选；只收候选/GIF，收到即下载去重；
+  - 数据集 `data/sticker_dataset/`（inbox/images/rejected/labels.jsonl/review.csv/stats.json）；
+  - 标注脚本 `scripts/label_sticker_dataset.py`（gemini 视觉 + 固定 taxonomy），
+    统计/复核 `scripts/sticker_dataset_report.py`，评测 `scripts/eval_sticker_understanding.py`；
+  - 附带改进：`image_caption_prompt` 改为表情包感知；人设要求「理解表情包但不发表情包」。
+- **放弃**：装 stealer 只采集（自带发送工具/AGPL/较重）；QQ 原生 mface（不可行）；微调（数据集先做标注/评测）。
+- **风险 / 限制**：
+  - 群友表情包隐私/版权：仅本地、ID 哈希、不公开、可删除；
+  - `mface` 段被 AstrBot 跳过时采集不到（已知限制）；
+  - VLM 标注成本/错误：小批量 + 人工复核 + 可迭代 taxonomy；
+  - 普通照片误收：只收有 sticker 信号/GIF，人工审核。
+- **验证**：
+  - store：`has_sticker_signal` 正确、sha256 去重生效；
+  - 用示例图跑标注：得到 `caption/emotion/intent/character/usage`（初音玩偶 → 委屈/生气）；
+  - report 生成 `stats.json`/`review.csv`；eval 能输出 generic vs sticker-aware 的 emotion/intent 分数；
+  - AstrBot 启动加载插件、创建数据集目录；healthcheck 通过。
+- **代码位置**：`plugins/astrbot_plugin_sticker_collector/`、`scripts/label_sticker_dataset.py`、
+  `scripts/sticker_dataset_report.py`、`scripts/eval_sticker_understanding.py`、`docs/sticker-dataset.md`。

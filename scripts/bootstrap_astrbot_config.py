@@ -141,7 +141,10 @@ def main() -> None:
 
     # --- 多模态：用视觉模型给图片做 caption，文本模型也能"看图" ---
     pset["default_image_caption_provider_id"] = "gemini-3.8-flash"
-    pset["image_caption_prompt"] = "用中文简短描述这张图片的关键内容（一句话）。"
+    pset["image_caption_prompt"] = (
+        "如果是表情包/贴纸：用一句话说明画面、图中文字、想表达的情绪和适用场景；"
+        "如果是普通照片：简短描述画面关键内容。"
+    )
 
     # --- 工具：本机 runtime 只开放 workspace 读写（读 QQ 附件/技能），禁执行 ---
     pset["computer_use_runtime"] = "local"
