@@ -148,6 +148,17 @@ python scripts\smoke_llm.py --provider deepseek --no-stream --message "帮我查
   # WebChat 里发：读取 D:\qqbot\data\temp\test.txt，暗号是什么
   ```
 
+## 掉线 / 漏消息恢复
+
+- 现象：NapCat 日志出现 `[KickedOffLine] 你的账号当前登录已失效`，端口 3000 消失、bot 不回消息。
+  通常是**同账号在别的设备/客户端登录**或 QQ 安全验证导致。
+- 恢复：打开 `http://127.0.0.1:6099/webui?token=<token>` 扫码重登（选对应小号），
+  等 AstrBot 日志重新出现「适配器已连接」，再跑 `scripts/healthcheck.py`。
+- **补回漏掉的消息**：重登后离线期间的消息不会进 AstrBot，可用 NapCat 的
+  `get_friend_msg_history` / `get_group_msg_history` 拉最近消息，再按人设手动补回复
+  （本项目 2026-10-24 已用该方式补回两条）。
+- 预防：小号只给 NapCat 用，不在手机/其他 PC 客户端同时登录；保持扫码环境固定。
+
 ## 群聊测试
 
 - 小号加入测试群（建议自己建的小群）；

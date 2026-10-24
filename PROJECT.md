@@ -139,6 +139,8 @@ Token 策略与实测见 D-016；外部插件版本见 [docs/external-plugins.md
 - **单轮固定开销偏高（实测 ~7.8k tokens）**：固定开销 ~3.7k + 工具声明 ~4.1k（本地文件/执行工具 schema 较大）；
   DeepSeek 有 prompt cache 命中（/mb_status 显示 ~7k 缓存），实际成本低于全价。后续可考虑自定义只读文件工具替代 local runtime。
 - **memory_beyond 较新**（4 stars，v1.3.7）：接管压缩/身份标注，升级前必须备份并看 CHANGELOG；人物记忆跨群可见（隐私）。
+- **账号被踢下线会漏消息**：2026-10-24 18:29 example 被 QQ 踢下线，离线期间消息不进 AstrBot；
+  重登后用 NapCat `get_friend_msg_history` 拉取并手动补回（已补回两条）。小号勿多端同时登录。
 - 图片 caption 会额外消耗视觉模型 token；主动插话仍关闭，等测试群。
 
 ## 8. 下一步计划
