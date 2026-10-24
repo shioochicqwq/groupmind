@@ -43,7 +43,7 @@ scp backups/data-YYYYmmdd-HHMMSS.zip user@vps:/opt/qqbot/
 cd /opt/qqbot
 unzip -o data-YYYYmmdd-HHMMSS.zip        # 得到 ./data/
 cp .env.example .env
-# 编辑 .env：DEEPSEEK_API_KEY、NAPCAT_WEBUI_TOKEN（openssl rand -hex 16）、NAPCAT_UID/GID
+# 编辑 .env：DEEPSEEK_API_KEY、MULTI_API_KEY、NAPCAT_WEBUI_TOKEN（openssl rand -hex 16）、NAPCAT_UID/GID
 mkdir -p runtime/napcat runtime/ntqq
 chown -R "${NAPCAT_UID:-1000}:${NAPCAT_GID:-1000}" runtime
 docker compose pull

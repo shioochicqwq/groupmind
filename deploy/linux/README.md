@@ -23,7 +23,7 @@ napcat (mlikiowa/napcat-docker:v4.18.41)  --ws://astrbot:6199/ws-->  astrbot (so
 # 在 VPS 上，仓库路径示例 /opt/qqbot
 cd /opt/qqbot
 cp .env.example .env
-# 编辑 .env：填入 DEEPSEEK_API_KEY、NAPCAT_WEBUI_TOKEN（openssl rand -hex 16）
+# 编辑 .env：填入 DEEPSEEK_API_KEY、MULTI_API_KEY、NAPCAT_WEBUI_TOKEN（openssl rand -hex 16）
 # 注意 NAPCAT_UID/NAPCAT_GID 要与目录属主一致
 mkdir -p data runtime/napcat runtime/ntqq
 sudo chown -R "${NAPCAT_UID:-1000}:${NAPCAT_GID:-1000}" runtime

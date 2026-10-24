@@ -47,10 +47,9 @@ QQ 小号 ⇄ NapCat 4.18.28（NTQQ 协议端，OneBot v11）
 
 ## 4. 进行中 / 待验证
 
-- [ ] QQ 私聊实测：主号给 `example` 发消息 → 应收到人设化回复
-- [ ] 测试群：把小号拉进测试群 → 群号填入 `active_reply.whitelist`，验证 @ 回复/上下文/主动插话
-- [ ] 群聊整活实测迭代：按 [group-chat-tuning.md](docs/group-chat-tuning.md) 调概率/上下文/分段
-- [ ] VPS Docker 化部署（资产已就绪，等 VPS 与迁移窗口）
+- [x] **QQ 私聊实测通过**（2026-10-24 17:10）：主号发「在吗」→ example 回「在呢，周六了还找我啥事」
+- [ ] 群聊实测：用户确认现有群 `<GROUP_ID>` 不作为测试群；**暂缓**，待有合适的测试群再验收 @ 回复/上下文/主动插话
+- [ ] VPS Docker 化部署（资产已就绪，等 VPS 访问方式与迁移窗口）
 
 ## 5. 关键路径与端口
 
@@ -64,7 +63,7 @@ QQ 小号 ⇄ NapCat 4.18.28（NTQQ 协议端，OneBot v11）
 | NapCat WebUI | `http://127.0.0.1:6099/webui?token=<token>`（token 在 `D:\Apps\NapCat\config\webui.json`） |
 | NapCat OneBot 配置 | `D:\Apps\NapCat\config\onebot11_<QQ号>.json` |
 | 旧抓图脚本接口 | NapCat HTTP server `:3000`，HTTP 上报 `http://127.0.0.1:8080/qq_event`（保留） |
-| 小号已加入群 | `<GROUP_ID>`「<GROUP_NAME>」（54 人，待确认是否作为测试群） |
+| 小号已加入群 | `<GROUP_ID>`「<GROUP_NAME>」（54 人，**不作为测试群**） |
 | LLM Key | 本地 `.env` 的 `DEEPSEEK_API_KEY` / `MULTI_API_KEY`（gitignored） |
 
 ## 6. 模型切换能力
@@ -92,7 +91,35 @@ QQ 小号 ⇄ NapCat 4.18.28（NTQQ 协议端，OneBot v11）
 
 ## 8. 下一步计划
 
-1. 重新扫码登录小号 `<BOT_QQ>` → 确认 AstrBot 日志「适配器已连接」。
-2. 提供 LLM Key（写入 `.env`）→ 用 AstrBot 内置 Web Chat 验证模型回复，再进群 @ 测试。
-3. 调人格与群聊行为（主动插话、分段、表情、频率限制）。
-4. 迁移 VPS：按 [migration-vps.md](docs/migration-vps.md) 走，扫码后用 [deploy/linux/README.md](deploy/linux/README.md) 验收，观察 24h。
+1. **VPS 部署**（当前唯一阻塞项）：用户提供 VPS 访问方式后，按 [migration-vps.md](docs/migration-vps.md) 迁移，
+   用 [deploy/linux/README.md](deploy/linux/README.md) 验收，观察 24h。
+2. 群聊验收：等有合适的测试群后，把群号填入 `active_reply.whitelist`，按 [group-chat-tuning.md](docs/group-chat-tuning.md) 调参。
+3. 安全收尾：WebUI 初始密码改为强密码；核发的 LLM key 使用一段时间后轮换；VPS 上确认 WebUI 只经 SSH 隧道访问。
+4. 可选增强（按需）：表情包/戳一戳插件、主动插话升级（smart_wake 类）。
+
+## 9. 变更记录
+
+### A-1（2026-10-24）项目初始化与本地链路搭建
+
+- 仓库骨架、`PROJECT.md`/`DECISIONS.md`/runbook、Windows 启动脚本；
+- AstrBot v4.29.1（uv tool）+ 本机既有 NapCat（OneBot v11 反向 WS）；
+- 打通 `QQ ⇄ NapCat ⇄ AstrBot` 基础链路。
+
+### A-2（2026-10-24）NapCat 兼容性修复与 VPS 资产
+
+- 定位并修复 NapCat 4.18.28 对 QQ 9.9.32-51246 的 Packet 不兼容：升级到 **4.18.41**（旧版已备份）；
+- 新增根目录 `docker-compose.yml`（AstrBot + NapCat，WebUI 仅绑 127.0.0.1）、`.env.example`、VPS 迁移清单、`backup_data.py`；
+- 修正 NapCat 启动脚本工作目录（避免在仓库根生成 `guild*.db`）。
+
+### A-3（2026-10-24）群聊陪聊/整活策略
+
+- 人设 `example`（群友口吻）落库，`scripts/apply_persona.py` 幂等写入；
+- 群聊上下文 ICL、3% 概率主动插话、分段回复、20 条/分限流写入 bootstrap 配置；
+- 新增 [group-chat-tuning.md](docs/group-chat-tuning.md) 与验收/回滚清单。
+
+### A-4（2026-10-24）多模型接入与 QQ 私聊验收
+
+- 接入 DeepSeek 官方 + OpenAI 兼容聚合端点（5 模型），密钥走 `.env` + `$ENV` 引用；
+- 新增 `scripts/smoke_llm.py`，WebChat 全链路实测 deepseek/gemini/claude 均正常；
+- 管理员 ID 增加 QQ 主号 `<ADMIN_QQ>`（`/provider`、`/model`、`/reset`）；
+- **QQ 私聊实测通过**（「在吗」→「在呢，周六了还找我啥事」）；群聊测试经用户确认暂缓。

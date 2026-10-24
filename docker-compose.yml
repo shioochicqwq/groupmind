@@ -17,8 +17,9 @@ services:
       - no-new-privileges:true
     environment:
       - TZ=Asia/Shanghai
-      # Provider keys are referenced from data/cmd_config.json as $DEEPSEEK_API_KEY
+      # Provider keys are referenced from data/cmd_config.json as $DEEPSEEK_API_KEY / $MULTI_API_KEY
       - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
+      - MULTI_API_KEY=${MULTI_API_KEY:-}
     volumes:
       - ./data:/AstrBot/data
       - /etc/localtime:/etc/localtime:ro
