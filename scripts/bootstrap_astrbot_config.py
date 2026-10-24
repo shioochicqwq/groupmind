@@ -111,6 +111,12 @@ def main() -> None:
             },
         )
 
+    # --- 管理员：Dashboard 用户名 + QQ 主号（/provider、/model 等管理员指令需要） ---
+    admins = cfg.setdefault("admins_id", ["astrbot"])
+    for admin in ("astrbot", "<ADMIN_QQ>"):
+        if admin not in admins:
+            admins.append(admin)
+
     # --- 群聊上下文：被动携带最近群消息，便于整活/接梗 ---
     ltm = cfg.setdefault("provider_ltm_settings", {})
     ltm["group_message_history_enable"] = True

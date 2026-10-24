@@ -64,7 +64,8 @@ QQ 小号 ⇄ NapCat 4.18.28（NTQQ 协议端，OneBot v11）
 | NapCat WebUI | `http://127.0.0.1:6099/webui?token=<token>`（token 在 `D:\Apps\NapCat\config\webui.json`） |
 | NapCat OneBot 配置 | `D:\Apps\NapCat\config\onebot11_<QQ号>.json` |
 | 旧抓图脚本接口 | NapCat HTTP server `:3000`，HTTP 上报 `http://127.0.0.1:8080/qq_event`（保留） |
-| LLM Key | 本地 `.env` 的 `DEEPSEEK_API_KEY` 等（gitignored） |
+| 小号已加入群 | `<GROUP_ID>`「<GROUP_NAME>」（54 人，待确认是否作为测试群） |
+| LLM Key | 本地 `.env` 的 `DEEPSEEK_API_KEY` / `MULTI_API_KEY`（gitignored） |
 
 ## 6. 模型切换能力
 
@@ -74,6 +75,7 @@ QQ 小号 ⇄ NapCat 4.18.28（NTQQ 协议端，OneBot v11）
     `gemini-3.8-flash`、`claude-sonnet-4-6`、`claude-opus-4-6`、`gpt-6-astra`、`gpt-6.1-sol`
 - 会话内切换：`/provider`、`/model`（管理员指令），按会话持久化；默认模型见
   `agent_runner.config.model.provider_id`。
+- 管理员 ID：`astrbot`（Dashboard）与 `<ADMIN_QQ>`（QQ 主号，可用 `/provider`、`/model`、`/reset`）。
 - 冒烟测试：`python scripts/smoke_llm.py --provider <id>`（经 AstrBot WebChat 全链路，见 runbook）。
 - 后续可用「配置文件（Config Profiles）」给不同群设不同默认模型。
 - 新增 provider：WebUI「模型提供商」添加 source + 模型，key 用 `$VAR` 环境变量。
