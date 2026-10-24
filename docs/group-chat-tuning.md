@@ -13,15 +13,21 @@
 | 上下文条数 | `group_message_max_cnt` | `200` | ICL 注入上限 |
 | 历史持久化 | `group_message_history_enable` | `true` | 按会话存最近消息 |
 | 历史条数 | `group_message_history_max_cnt` | `200` | |
-| 主动插话 | `active_reply.enable` | `true` | 未被 @ 时按概率参与 |
-| 主动插话概率 | `active_reply.possibility_reply` | `0.03` | 3%，先低后调 |
-| 主动插话白名单 | `active_reply.whitelist` | `[]` | **测试群确定后填群号**，避免全群生效 |
+| 主动插话 | `active_reply.enable` | **`false`（暂关）** | 当前小号所在群不是测试群，避免误插话；有测试群后开启 |
+| 主动插话概率 | `active_reply.possibility_reply` | `0.03` | 开启后 3%，先低后调 |
+| 主动插话白名单 | `active_reply.whitelist` | `[]` | **开启时必须填测试群号**，避免全群生效 |
+| 默认模型 | `agent_runner.config.model.provider_id` | `deepseek` | 短、便宜、稳；可 `/model` 切 gemini 等 |
+| 模型回退 | `fallback_provider_ids` | `["gemini-3.8-flash"]` | deepseek 失败/限流时自动回退 |
 | 分段回复 | `platform_settings.segmented_reply.enable` | `true` | 长回复拆成多条，像真人 |
 | 分段阈值 | `words_count_threshold` | `150` | 超过才拆 |
 | 分段间隔 | `interval` | `1.5,3.5` 秒 | 随机 |
 | 限流 | `platform_settings.rate_limit` | 60s / 20 条 | 防刷屏兜底 |
 
 ## 2. 主动插话的前提
+
+> 当前 `active_reply.enable=false`：小号所在的群（`<GROUP_ID>`）已被用户确认**不是测试群**，
+> 在确认测试群前保持关闭，避免在真实群里误插话。
+> 开启步骤：`enable=true` + `whitelist=["<测试群号>"]`，然后重启 AstrBot。
 
 AstrBot 的主动回复要求**该会话已存在对话**（`session_curr_cid`）。所以：
 

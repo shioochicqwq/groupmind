@@ -71,9 +71,12 @@ def main() -> None:
             "enable": True,
         },
     )
-    cfg.setdefault("agent_runner", {}).setdefault("config", {}).setdefault("model", {})[
-        "provider_id"
-    ] = "deepseek"
+    model_cfg = cfg.setdefault("agent_runner", {}).setdefault("config", {}).setdefault(
+        "model", {}
+    )
+    model_cfg["provider_id"] = "deepseek"
+    # 默认模型失败/限流时回退到聚合端点的快速模型。
+    model_cfg["fallback_provider_ids"] = ["gemini-3.8-flash"]
 
     # --- 自定义 OpenAI 兼容聚合端点：多模型切换（gemini/claude/gpt） ---
     multi_base = os.environ.get("MULTI_API_BASE", "https://<GATEWAY_HOST>/v1")
@@ -124,7 +127,9 @@ def main() -> None:
     ltm["group_icl_enable"] = True
     ltm["group_message_max_cnt"] = 200
     ltm["active_reply"] = {
-        "enable": True,
+        # 测试群确认前保持关闭：当前小号所在群不是测试群，避免误插话。
+        # 等有测试群后改为 True，并把群号填进 whitelist。
+        "enable": False,
         "method": "possibility_reply",
         # 主动插话概率：3%。先低后调，避免刷屏被群管理嫌弃。
         "possibility_reply": 0.03,

@@ -81,7 +81,16 @@ python scripts\smoke_llm.py --provider deepseek --message "记住：我叫小明
 
 - 群聊触发/主动插话/分段/限流等参数由 `scripts/bootstrap_astrbot_config.py` 管理，
   调整后重启 AstrBot；调参说明与验收清单见 [group-chat-tuning.md](group-chat-tuning.md)。
-- 主动插话需要会话已存在：先在群里 @ 小号一次。
+- 人设评测（没有测试群时用 WebChat 模拟群聊场景）：
+
+  ```powershell
+  $env:ASTRBOT_DASHBOARD_PASSWORD='<WebUI 密码>'
+  $env:PYTHONIOENCODING='utf-8'
+  python scripts\eval_persona.py --provider deepseek
+  ```
+
+  结果记录：[persona-eval.md](persona-eval.md)。
+- 主动插话需要会话已存在：先在群里 @ 小号一次。当前默认关闭，等测试群再开。
 
 ## 一键体检
 

@@ -79,9 +79,13 @@ QQ 小号 ⇄ NapCat 4.18.28（NTQQ 协议端，OneBot v11）
 - 会话内切换：`/provider`、`/model`（管理员指令），按会话持久化；默认模型见
   `agent_runner.config.model.provider_id`。
 - 管理员 ID：`astrbot`（Dashboard）与 `<ADMIN_QQ>`（QQ 主号，可用 `/provider`、`/model`、`/reset`）。
+- 默认模型 `deepseek`（短、便宜、稳），`fallback_provider_ids=["gemini-3.8-flash"]`（deepseek 失败时自动回退）。
 - 冒烟测试：`python scripts/smoke_llm.py --provider <id>`（经 AstrBot WebChat 全链路，见 runbook）；
   `--followup` 可在同一会话发第二条消息，验证多轮上下文。
-- **验证矩阵（2026-10-24，WebChat 全链路实测 6/6）**：
+- 人设评测：`python scripts/eval_persona.py --provider <id>`（10 个群聊场景 + 风格指标），
+  结果与结论见 [docs/persona-eval.md](docs/persona-eval.md)。
+
+**验证矩阵（2026-10-24，WebChat 全链路实测 6/6）**
 
 | provider | 回复示例（群友口吻） | 状态 |
 |---|---|---|
@@ -104,17 +108,22 @@ QQ 小号 ⇄ NapCat 4.18.28（NTQQ 协议端，OneBot v11）
 - NapCat WebUI 默认无访问控制（`accessControlMode: none` 且监听 `::`），VPS 部署必须改用防火墙/仅内网监听（compose 已绑定 127.0.0.1）。
 - NapCat / QQ 必须以 NapCat 目录为工作目录启动，否则会在仓库根写出 `guild*.db`（启动脚本已 `Set-Location` 修正，gitignore 兜底）。
 - 主动插话依赖会话已存在（先 @ 一次产生对话），否则日志报 `No active conversation`。
+- **主动插话当前关闭**（`active_reply.enable=false`）：小号所在群不是测试群，避免误插话；有测试群后再开并填白名单。
+- 图片理解未开：群里有图只会显示 `[Image]`，可后续用视觉模型做 image caption。
 - 尚未做刷屏/被举报的线上观察，限流与主动插话概率需要实群调参。
 - **内存容量风险（2026-10-24 实测）**：AstrBot RSS ≈ 264 MB，QQ 相关进程合计 ≈ 1.8 GB（Electron 多进程），
   NapCat 方案在 2 GB VPS 上会很紧；建议 ≥4 GB 或改官方 QQ 机器人（能力受限），见 D-011。
 
 ## 8. 下一步计划
 
-1. **VPS 原生部署**（用户暂缓，等 VPS 就绪）：按 [deploy/linux/native/README.md](deploy/linux/native/README.md)
-   与 [migration-vps.md](docs/migration-vps.md) 执行；海外 VPS 注意 QQ 风控与内存上限（D-011）。
-2. 群聊验收：等有合适的测试群后，把群号填入 `active_reply.whitelist`，按 [group-chat-tuning.md](docs/group-chat-tuning.md) 调参。
-3. 安全收尾：WebUI 初始密码改为强密码；LLM key 使用一段时间后轮换；VPS 上确认 WebUI 只经 SSH 隧道访问。
-4. 可选增强（按需）：表情包/戳一戳插件、主动插话升级（smart_wake 类）。
+1. **本地调优优先（用户决定：VPS 暂缓，调好再说）**：人设/群聊行为迭代，评测脚本见
+   [persona-eval.md](docs/persona-eval.md)；等有测试群后再验收群聊与主动插话。
+2. 群聊验收：等有合适的测试群后，把群号填入 `active_reply.whitelist` 并开启 `active_reply.enable`，
+   按 [group-chat-tuning.md](docs/group-chat-tuning.md) 调参。
+3. VPS 部署（暂缓）：按 [deploy/linux/native/README.md](deploy/linux/native/README.md) 与
+   [migration-vps.md](docs/migration-vps.md) 执行；海外 VPS 注意 QQ 风控与内存上限（D-011）。
+4. 安全收尾：WebUI 初始密码改为强密码；LLM key 使用一段时间后轮换。
+5. 可选增强（按需）：表情包/戳一戳插件、图片理解（image caption）、主动插话升级（smart_wake 类）。
 
 ## 9. 变更记录
 
@@ -171,3 +180,12 @@ QQ 小号 ⇄ NapCat 4.18.28（NTQQ 协议端，OneBot v11）
 - 全部 6 个 provider 经 AstrBot WebChat 实测回复正常（见第 6 节验证矩阵）；
 - 多轮上下文实测通过（自我介绍 → 追问记忆）；
 - 结论：多模型切换 + 对话记忆链路在 QQ 之外已完整验证，QQ 私聊也已实测。
+
+### A-9（2026-10-24）本地调优：人设评测、主动插话收紧、模型回退
+
+- 用户决定 **VPS 暂缓，先本地调好**；
+- 新增 `scripts/eval_persona.py`（10 个群聊场景 + 风格指标），deepseek 与 gemini-3.8-flash 各测一轮：
+  平均 16.4 / 23.6 字，0 超长、0 AI 自指、0 Markdown；结论与样例见 [docs/persona-eval.md](docs/persona-eval.md)；
+- 默认模型保持 deepseek，新增失败回退 `gemini-3.8-flash`；
+- **主动插话改为默认关闭**（小号所在群非测试群，避免误插话），开启条件写入调参文档；
+- 记录未测项：图片理解未开、分段实际频率、真实群上下文与主动插话。
