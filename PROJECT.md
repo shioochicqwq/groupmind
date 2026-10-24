@@ -79,8 +79,21 @@ QQ 小号 ⇄ NapCat 4.18.28（NTQQ 协议端，OneBot v11）
 - 会话内切换：`/provider`、`/model`（管理员指令），按会话持久化；默认模型见
   `agent_runner.config.model.provider_id`。
 - 管理员 ID：`astrbot`（Dashboard）与 `<ADMIN_QQ>`（QQ 主号，可用 `/provider`、`/model`、`/reset`）。
-- 冒烟测试：`python scripts/smoke_llm.py --provider <id>`（经 AstrBot WebChat 全链路，见 runbook）。
-- 后续可用「配置文件（Config Profiles）」给不同群设不同默认模型。
+- 冒烟测试：`python scripts/smoke_llm.py --provider <id>`（经 AstrBot WebChat 全链路，见 runbook）；
+  `--followup` 可在同一会话发第二条消息，验证多轮上下文。
+- **验证矩阵（2026-10-24，WebChat 全链路实测 6/6）**：
+
+| provider | 回复示例（群友口吻） | 状态 |
+|---|---|---|
+| `deepseek` | 群友<BOT_NAME>，闲聊摸鱼专用，别问我正经事 | ✅ |
+| `gemini-3.8-flash` | 这破天忽冷忽热的，纯在随机抽人感冒。 | ✅ |
+| `claude-sonnet-4-6` | 这鬼天气是在跟我过不去吧🙂 | ✅ |
+| `claude-opus-4-6` | 宅家躺尸，不接受反驳 | ✅ |
+| `gpt-6-astra` | 先睡到自然醒，剩下的醒了再说。 | ✅ |
+| `gpt-6.1-sol` | 先睡到自然醒，剩下的醒了再说。 | ✅ |
+
+- 多轮上下文：同一 WebChat 会话中「记住：我叫小明，喜欢打游戏」→「我叫什么？喜欢干嘛？」→
+  「小明啊，喜欢打游戏，刚说完就考我」，✅ 记忆生效。
 - 新增 provider：WebUI「模型提供商」添加 source + 模型，key 用 `$VAR` 环境变量。
 
 ## 7. 已知问题与技术债
@@ -151,3 +164,10 @@ QQ 小号 ⇄ NapCat 4.18.28（NTQQ 协议端，OneBot v11）
 - 结论：NapCat + AstrBot 合计约 1–2 GB，2 GB VPS 极紧张；VPS 建议 ≥4 GB + swap，
   否则退回官方 QQ 机器人方案（轻量但能力受限）；
 - 已更新 `deploy/linux/native/README.md`（资源预算）与 D-011 风险记录；更正目标描述为「原生 systemd 部署」。
+
+### A-8（2026-10-24）全模型与多轮上下文验证
+
+- `scripts/smoke_llm.py` 增加 `--followup`（同会话第二条消息）；
+- 全部 6 个 provider 经 AstrBot WebChat 实测回复正常（见第 6 节验证矩阵）；
+- 多轮上下文实测通过（自我介绍 → 追问记忆）；
+- 结论：多模型切换 + 对话记忆链路在 QQ 之外已完整验证，QQ 私聊也已实测。

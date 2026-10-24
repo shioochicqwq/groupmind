@@ -145,7 +145,9 @@
 - **理由**：复用 AstrBot 多 provider 机制，零自研路由；一个聚合 key 覆盖多家模型；默认模型与实验模型分离，避免群聊被不稳定端点拖累。
 - **放弃**：只接一个模型（不满足需求）；key 写进 `cmd_config.json`（配置易被备份/提交泄漏）。
 - **风险**：第三方聚合端点的稳定性与隐私（请求经第三方转发），敏感对话不应走该端点；密钥曾出现在对话和 QQ 消息中，**建议使用一段时间后轮换**。
-- **验证**：AstrBot 启动日志成功加载 6 个 provider 并选中 deepseek 为默认；`smoke_llm.py` 实测 `deepseek`、`gemini-3.8-flash`、`claude-sonnet-4-6` 均返回人设化回复（无报错）。
+- **验证**：AstrBot 启动日志成功加载 6 个 provider 并选中 deepseek 为默认；`smoke_llm.py` 实测全部 6 个 provider
+  （deepseek / gemini-3.8-flash / claude-sonnet-4-6 / claude-opus-4-6 / gpt-6-astra / gpt-6.1-sol）均返回人设化回复（无报错）；
+  同会话多轮追问实测记忆生效。
 
 ## D-011 VPS 改为原生 systemd 部署（不使用 Docker）
 

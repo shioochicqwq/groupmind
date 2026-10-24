@@ -62,6 +62,8 @@ $env:ASTRBOT_DASHBOARD_PASSWORD='<WebUI 密码>'
 $env:PYTHONIOENCODING='utf-8'
 python scripts\smoke_llm.py --provider deepseek
 python scripts\smoke_llm.py --provider gemini-3.8-flash --message "用一句话吐槽今天的天气"
+# 验证多轮上下文（同一会话发第二条）
+python scripts\smoke_llm.py --provider deepseek --message "记住：我叫小明，喜欢打游戏" --followup "我叫什么？喜欢干嘛？"
 ```
 
 已配置模型：`deepseek-chat`（默认）、`gemini-3.8-flash`、`claude-sonnet-4-6`、

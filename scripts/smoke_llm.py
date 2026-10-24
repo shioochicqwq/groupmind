@@ -91,6 +91,11 @@ def main() -> int:
     )
     parser.add_argument("--provider", default="", help="selected_provider id, empty = default")
     parser.add_argument("--message", default="用一句话介绍你自己，别超过 30 字")
+    parser.add_argument(
+        "--followup",
+        default="",
+        help="optional second message in the SAME session (tests multi-turn context)",
+    )
     args = parser.parse_args()
 
     if not args.password:
@@ -112,6 +117,13 @@ def main() -> int:
         if args.provider:
             payload["selected_provider"] = args.provider
         reply, errors = stream_reply(args.dashboard, payload, token)
+        followup_reply = ""
+        if args.followup:
+            payload2 = {"message": args.followup, "session_id": sid}
+            if args.provider:
+                payload2["selected_provider"] = args.provider
+            followup_reply, errors2 = stream_reply(args.dashboard, payload2, token)
+            errors.extend(errors2)
     except urllib.error.HTTPError as exc:
         print(f"HTTP {exc.code}: {exc.read().decode('utf-8', 'replace')[:500]}")
         return 1
@@ -121,9 +133,13 @@ def main() -> int:
 
     print(f"provider: {args.provider or '(default)'}")
     print(f"reply   : {reply or '(empty)'}")
+    if args.followup:
+        print(f"followup: {args.followup}")
+        print(f"reply2  : {followup_reply or '(empty)'}")
     if errors:
         print(f"errors  : {errors}")
-    return 0 if reply and not errors else 1
+    ok = reply and not errors and (not args.followup or followup_reply)
+    return 0 if ok else 1
 
 
 if __name__ == "__main__":
