@@ -47,6 +47,7 @@ QQ 小号 ⇄ NapCat 4.18.28（NTQQ 协议端，OneBot v11）
 - [x] 小号 `<BOT_QQ>` 重新扫码登录成功，AstrBot WS 适配器已连接
 - [x] 私聊/群聊测试链路已具备：QQ 消息 → NapCat → AstrBot（人设 example + 多模型）
 - [x] VPS 部署方案改为**原生 systemd（不使用 Docker）**：`deploy/linux/native/`（README + 两个 systemd 单元），迁移清单同步更新；Docker Compose 降级为可选 fallback（D-011）
+- [x] 一键体检脚本 `scripts/healthcheck.py`（跨平台，实测全 PASS）：端口、NapCat 登录/在线、平台适配器、6 provider、人格
 
 ## 4. 进行中 / 待验证
 
@@ -134,3 +135,10 @@ QQ 小号 ⇄ NapCat 4.18.28（NTQQ 协议端，OneBot v11）
   `qqbot-astrbot.service`、`qqbot-napcat.service`（含 MemoryMax/CPU/IO 限制）；
 - `docker-compose.yml` 移至 `deploy/linux/` 并标注为可选 fallback；删除 Docker 版 install.sh；
 - 重写 `docs/migration-vps.md` 为原生迁移清单（含海外 VPS 风控与 swap/内存建议）。
+
+### A-6（2026-10-24）一键体检脚本
+
+- 新增 `scripts/healthcheck.py`（Windows/Linux 通用，stdlib）：端口、NapCat 登录/在线、
+  平台适配器运行状态、LLM provider 数量、人格列表；
+- 本地实测 10 项全 PASS；runbook 与原生部署文档补充用法；
+- 可为 VPS 验收提供统一检查口径。

@@ -81,6 +81,16 @@ python scripts\smoke_llm.py --provider gemini-3.8-flash --message "用一句话�
   调整后重启 AstrBot；调参说明与验收清单见 [group-chat-tuning.md](group-chat-tuning.md)。
 - 主动插话需要会话已存在：先在群里 @ 小号一次。
 
+## 一键体检
+
+```powershell
+$env:ASTRBOT_DASHBOARD_PASSWORD='<WebUI 密码>'
+python scripts\healthcheck.py
+```
+
+检查：4 个端口、NapCat 登录/在线状态、AstrBot 平台适配器、6 个 LLM provider、人格。
+全部 PASS 退出码为 0；任何 FAIL 退出码 1（VPS 上同样适用，日志用 journalctl 对照）。
+
 ## 群聊测试
 
 - 小号加入测试群（建议自己建的小群）；

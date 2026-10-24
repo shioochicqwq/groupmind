@@ -113,6 +113,12 @@ systemctl status qqbot-astrbot qqbot-napcat --no-pager
 - 日志：`journalctl -u qqbot-astrbot -f`、`journalctl -u qqbot-napcat -f`
 - 资源上限在 unit 的 `MemoryMax=` 调整（默认 AstrBot 600M / NapCat 1100M）。
 - 验证连接：`journalctl -u qqbot-astrbot | grep 适配器已连接`
+- 一键体检（与本地相同脚本）：
+
+```bash
+export ASTRBOT_DASHBOARD_PASSWORD='<VPS 上 AstrBot WebUI 密码>'
+python3 /opt/qqbot/scripts/healthcheck.py
+```
 
 ## 5. 升级
 
