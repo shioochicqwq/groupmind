@@ -55,6 +55,19 @@
   - 群聊/私聊中（管理员）用 `/provider`、`/model` 切换。
 - 不把 Key 写进 `data/cmd_config.json`；provider 的 key 使用 `$DEEPSEEK_API_KEY` 环境变量引用。
 
+## 人格与群聊整活
+
+- 人设源文件：`config/personas/example.json`；写入 AstrBot：
+
+  ```powershell
+  $env:ASTRBOT_DASHBOARD_PASSWORD='<WebUI 密码>'
+  python scripts\apply_persona.py --file config\personas\example.json
+  ```
+
+- 群聊触发/主动插话/分段/限流等参数由 `scripts/bootstrap_astrbot_config.py` 管理，
+  调整后重启 AstrBot；调参说明与验收清单见 [group-chat-tuning.md](group-chat-tuning.md)。
+- 主动插话需要会话已存在：先在群里 @ 小号一次。
+
 ## 群聊测试
 
 - 小号加入测试群（建议自己建的小群）；

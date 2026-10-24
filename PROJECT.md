@@ -39,13 +39,15 @@ QQ 小号 ⇄ NapCat 4.18.28（NTQQ 协议端，OneBot v11）
 - [x] NapCat 升级 **4.18.28 → 4.18.41**：修复 `PacketBackend 不支持 QQ 9.9.32-51246` 兼容错误（升级后 `PacketHandler 初始化成功`）
 - [x] VPS 部署资产：根目录 `docker-compose.yml`（AstrBot v4.29.1 + NapCat v4.18.41，WebUI 仅绑定 127.0.0.1）、`.env.example`、[deploy/linux/README.md](deploy/linux/README.md)、[docs/migration-vps.md](docs/migration-vps.md)
 - [x] `scripts/backup_data.py` 已实测可打包 `data/`（排除 temp/）
+- [x] 群聊整活初始策略已落地：人格 `example`（[config/personas/example.json](config/personas/example.json)）、群聊上下文 ICL、3% 主动插话、分段回复、20 条/分限流；调参说明见 [docs/group-chat-tuning.md](docs/group-chat-tuning.md)
+- [x] `scripts/apply_persona.py` 通过 Dashboard API 幂等写入人格（已实测：AstrBot 启动日志 `Loaded 2 personas`）
 
 ## 4. 进行中 / 待验证
 
 - [ ] **NapCat 升级后需重新扫码登录**（快速登录提示「登录需要手Q验证」，回退二维码）
 - [ ] 填入 LLM API Key（DeepSeek 或其它）→ 对话可用
-- [ ] 群聊 @ 触发回复、上下文连续、模型切换（`/provider`、`/model`）
-- [ ] 群聊整活：主动插话、分段回复、表情包/戳一戳、防刷屏
+- [ ] 群聊 @ 触发回复、上下文连续、模型切换（`/provider`、`/model`）、主动插话效果
+- [ ] 群聊整活实测迭代：按 [group-chat-tuning.md](docs/group-chat-tuning.md) 调概率/上下文/分段
 - [ ] VPS Docker 化部署（资产已就绪，等 VPS 与迁移窗口）
 
 ## 5. 关键路径与端口
@@ -76,7 +78,8 @@ QQ 小号 ⇄ NapCat 4.18.28（NTQQ 协议端，OneBot v11）
 - AstrBot 升级会带来配置迁移风险：当前锁定 4.29.1，升级前备份 `data/`。
 - NapCat WebUI 默认无访问控制（`accessControlMode: none` 且监听 `::`），VPS 部署必须改用防火墙/仅内网监听（compose 已绑定 127.0.0.1）。
 - NapCat / QQ 必须以 NapCat 目录为工作目录启动，否则会在仓库根写出 `guild*.db`（启动脚本已 `Set-Location` 修正，gitignore 兜底）。
-- 尚未为「不刷屏/防滥用」做触发与限流调优。
+- 主动插话依赖会话已存在（先 @ 一次产生对话），否则日志报 `No active conversation`。
+- 尚未做刷屏/被举报的线上观察，限流与主动插话概率需要实群调参。
 
 ## 8. 下一步计划
 

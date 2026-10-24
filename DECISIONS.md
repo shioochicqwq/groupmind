@@ -109,3 +109,19 @@
   - 以后 QQ 自动更新后若再出现 Packet/偏移告警，先查 NapCat release 的兼容表，再升级 NapCat。
 - **风险**：NapCat 升级会改变设备指纹/登录态，快速登录（`-q <uin>`）提示「登录需要手Q验证」，需回退扫码；QQ 自动更新可能再次超出兼容范围。
 - **验证**：升级后日志 `[PacketHandler] 初始化成功`、无 `PacketBackend 不支持`；登录 + 发送消息实测通过（本次升级前已实测私聊发送成功，升级待重新扫码后复测）。
+
+## D-009 群聊「陪聊/整活」初始策略：内置能力优先，插件后置
+
+- **日期**：2026-10-24
+- **背景**：目标是群聊里像群友一样陪聊/整活，需要人设、触发方式、上下文和防刷屏；但不能一上来堆插件导致难排查。
+- **调查**：AstrBot 内置 `provider_ltm_settings`（`group_icl_enable` 群聊上下文注入、`active_reply` 概率主动回复、`group_message_history_enable` 历史持久化）+ `platform_settings.segmented_reply`（分段回复）+ 内置限流；社区有 `smart_wake` 等两级漏斗主动插话插件。
+- **决策**（初始值，均在 `scripts/bootstrap_astrbot_config.py` 中幂等写入）：
+  - 人设用 `example`（短句、口语、群友感、不 AI 腔），定义在 `config/personas/example.json`；
+  - 群聊上下文：`group_icl_enable=true`、`group_message_max_cnt=200`、`group_message_history_enable=true`；
+  - 主动插话：`active_reply.enable=true`、`method=possibility_reply`、概率 **3%**、白名单留空（测试群确定后填群号）；
+  - 分段回复：开启，阈值 150 字、间隔 1.5–3.5s（像真人补话）；
+  - 限流：60s / 20 条兜底；内容安全内置关键词保持开启。
+- **理由**：全部复用内置能力，零额外依赖、可单独关闭、调参维度清晰；先跑通再按症状加插件（表情包、戳一戳、smart_wake）。
+- **放弃**：首版直接上 `smart_wake`（多一层模型判定与配置，增加调试变量）；自写主动插话插件（无必要）。
+- **风险**：3% 是全局概率，多群时会到处插话——先低概率并尽快填白名单；ICL 注入增加 token 成本；人设是否「像群友」需实群迭代。
+- **验证**：见 `docs/group-chat-tuning.md` 验收清单；AstrBot 重启日志已确认 `Loaded 2 personas` 与 `Segmented-reply interval: [1.5, 3.5]`。
