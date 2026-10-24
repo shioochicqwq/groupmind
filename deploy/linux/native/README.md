@@ -19,12 +19,17 @@ AstrBot（uv 安装，Python 3.12，systemd 服务）
 
 | 进程 | 常驻内存（估算） | 说明 |
 |---|---|---|
-| NapCat AppImage（Linux QQ Electron + NapCat） | 500–900 MB | 登录/收发消息峰值更高 |
-| AstrBot（Python） | 250–450 MB | 含向量/知识库依赖时偏高 |
+| NapCat AppImage（Linux QQ Electron + NapCat） | 700 MB–1.5 GB | Electron 多进程；本地 Windows QQ 实测合计 RSS ≈ 1.8 GB |
+| AstrBot（Python） | 250–450 MB | 本地实测运行时 RSS ≈ 264 MB（含依赖） |
 | Xvfb | < 20 MB | 无头显示 |
-| **合计** | **约 0.8–1.4 GB** | 2 GB VPS 需配 swap + 内存上限 |
+| **合计** | **约 1–2 GB** | 2 GB VPS **非常紧张**；建议 ≥4 GB，或改用官方 QQ 机器人方案 |
 
-建议：2 GB 内存的 VPS 先建 **2 GB swap**；systemd 用 `MemoryMax` 兜底，编译任务前可 `systemctl stop qqbot-napcat qqbot-astrbot`。
+> 2026-10-24 本地实测（Windows，仅供参考）：`python`（AstrBot）RSS ≈ 264 MB；
+> QQ 相关进程合计 RSS ≈ 1.8 GB（Electron 多进程，含主进程/渲染/GPU）。
+> Linux QQ 的进程模型类似，**不要按 2 GB VPS 规划**，除非接受频繁 OOM/swap 抖动。
+
+建议：≥2 GB 内存的 VPS 至少配 **2 GB swap**；systemd 用 `MemoryMax` 兜底，
+编译任务前 `systemctl stop qqbot-napcat qqbot-astrbot`。
 
 ## 1. 前置
 

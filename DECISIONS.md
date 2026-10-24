@@ -170,7 +170,9 @@
   资源紧张时可 `systemctl stop` 两个服务让编译任务独占内存。
 - **放弃**：Docker Compose（资源开销）；Lagrange（OneBot 11 已停维护）；继续 Windows 常驻（本机不能常驻）。
 - **风险 / 待验证**：
-  - 内存估算 AstrBot 250–450 MB + NapCat 500–900 MB，**未在目标 VPS 实测**，需按实测调 `MemoryMax` 并配 swap；
+  - **内存实测（2026-10-24，Windows 本地）**：AstrBot（python）RSS ≈ 264 MB；QQ 相关进程合计 RSS ≈ 1.8 GB（Electron 多进程）。
+    推算 Linux 上 NapCat + AstrBot 合计约 1–2 GB，**2 GB VPS 会非常紧张**；建议 ≥4 GB VPS，或退回官方 QQ 机器人方案（无客户端、轻量但能力受限）。
+    未在目标 VPS 实测，需按实测调 `MemoryMax` 并配 swap；
   - AppImage 的配置目录路径（推测 `/opt/napcat/config`）与快登/扫码流程需在 VPS 上实测确认；
   - 海外 IP 的 QQ 风控是方案级风险，无法完全消除。
 - **验证**：`deploy/linux/native/` 下的 README 与 systemd 单元为待执行清单；

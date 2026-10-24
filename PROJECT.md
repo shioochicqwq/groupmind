@@ -92,6 +92,8 @@ QQ 小号 ⇄ NapCat 4.18.28（NTQQ 协议端，OneBot v11）
 - NapCat / QQ 必须以 NapCat 目录为工作目录启动，否则会在仓库根写出 `guild*.db`（启动脚本已 `Set-Location` 修正，gitignore 兜底）。
 - 主动插话依赖会话已存在（先 @ 一次产生对话），否则日志报 `No active conversation`。
 - 尚未做刷屏/被举报的线上观察，限流与主动插话概率需要实群调参。
+- **内存容量风险（2026-10-24 实测）**：AstrBot RSS ≈ 264 MB，QQ 相关进程合计 ≈ 1.8 GB（Electron 多进程），
+  NapCat 方案在 2 GB VPS 上会很紧；建议 ≥4 GB 或改官方 QQ 机器人（能力受限），见 D-011。
 
 ## 8. 下一步计划
 
@@ -142,3 +144,10 @@ QQ 小号 ⇄ NapCat 4.18.28（NTQQ 协议端，OneBot v11）
   平台适配器运行状态、LLM provider 数量、人格列表；
 - 本地实测 10 项全 PASS；runbook 与原生部署文档补充用法；
 - 可为 VPS 验收提供统一检查口径。
+
+### A-7（2026-10-24）内存实测与容量结论
+
+- 实测本地：AstrBot RSS ≈ 264 MB；QQ 相关进程合计 ≈ 1.8 GB（Electron 多进程）；
+- 结论：NapCat + AstrBot 合计约 1–2 GB，2 GB VPS 极紧张；VPS 建议 ≥4 GB + swap，
+  否则退回官方 QQ 机器人方案（轻量但能力受限）；
+- 已更新 `deploy/linux/native/README.md`（资源预算）与 D-011 风险记录；更正目标描述为「原生 systemd 部署」。
