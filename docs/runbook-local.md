@@ -53,7 +53,20 @@
 - 换模型/加 provider：
   - WebUI →「模型提供商」新增任意 OpenAI 兼容服务；
   - 群聊/私聊中（管理员）用 `/provider`、`/model` 切换。
-- 不把 Key 写进 `data/cmd_config.json`；provider 的 key 使用 `$DEEPSEEK_API_KEY` 环境变量引用。
+- 不把 Key 写进 `data/cmd_config.json`；provider 的 key 使用 `$DEEPSEEK_API_KEY` / `$MULTI_API_KEY` 环境变量引用。
+
+### 模型冒烟测试（不依赖 QQ 群）
+
+```powershell
+$env:ASTRBOT_DASHBOARD_PASSWORD='<WebUI 密码>'
+$env:PYTHONIOENCODING='utf-8'
+python scripts\smoke_llm.py --provider deepseek
+python scripts\smoke_llm.py --provider gemini-3.8-flash --message "用一句话吐槽今天的天气"
+```
+
+已配置模型：`deepseek-chat`（默认）、`gemini-3.8-flash`、`claude-sonnet-4-6`、
+`claude-opus-4-6`、`gpt-6-astra`、`gpt-6.1-sol`（自定义聚合端点，见 `.env` 的 `MULTI_API_BASE`）。
+群聊/私聊里管理员可用 `/provider`、`/model` 切换。
 
 ## 人格与群聊整活
 

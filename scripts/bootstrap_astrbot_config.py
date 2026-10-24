@@ -11,6 +11,7 @@ Usage:
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -73,6 +74,42 @@ def main() -> None:
     cfg.setdefault("agent_runner", {}).setdefault("config", {}).setdefault("model", {})[
         "provider_id"
     ] = "deepseek"
+
+    # --- 自定义 OpenAI 兼容聚合端点：多模型切换（gemini/claude/gpt） ---
+    multi_base = os.environ.get("MULTI_API_BASE", "https://<GATEWAY_HOST>/v1")
+    upsert(
+        cfg.setdefault("provider_sources", []),
+        {
+            "id": "multi_source",
+            "provider": "openai",
+            "type": "openai_chat_completion",
+            "provider_type": "chat_completion",
+            "enable": True,
+            "key": ["$MULTI_API_KEY"],
+            "api_base": multi_base,
+            "timeout": 120,
+            "proxy": "",
+            "custom_headers": {},
+        },
+    )
+    for model_id in (
+        "gemini-3.8-flash",
+        "claude-sonnet-4-6",
+        "claude-opus-4-6",
+        "gpt-6-astra",
+        "gpt-6.1-sol",
+    ):
+        upsert(
+            cfg.setdefault("provider", []),
+            {
+                "id": model_id,
+                "provider_source_id": "multi_source",
+                "model": model_id,
+                "modalities": [],
+                "custom_extra_body": {},
+                "enable": True,
+            },
+        )
 
     # --- 群聊上下文：被动携带最近群消息，便于整活/接梗 ---
     ltm = cfg.setdefault("provider_ltm_settings", {})

@@ -41,12 +41,14 @@ QQ 小号 ⇄ NapCat 4.18.28（NTQQ 协议端，OneBot v11）
 - [x] `scripts/backup_data.py` 已实测可打包 `data/`（排除 temp/）
 - [x] 群聊整活初始策略已落地：人格 `example`（[config/personas/example.json](config/personas/example.json)）、群聊上下文 ICL、3% 主动插话、分段回复、20 条/分限流；调参说明见 [docs/group-chat-tuning.md](docs/group-chat-tuning.md)
 - [x] `scripts/apply_persona.py` 通过 Dashboard API 幂等写入人格（已实测：AstrBot 启动日志 `Loaded 2 personas`）
+- [x] 双 provider 已加载：DeepSeek（默认）+ 自定义聚合端点 5 个模型；WebChat 冒烟测试三种模型均正常回复（`scripts/smoke_llm.py`）
+- [x] 小号 `<BOT_QQ>` 重新扫码登录成功，AstrBot WS 适配器已连接
+- [x] 私聊/群聊测试链路已具备：QQ 消息 → NapCat → AstrBot（人设 example + 多模型）
 
 ## 4. 进行中 / 待验证
 
-- [ ] **NapCat 升级后需重新扫码登录**（快速登录提示「登录需要手Q验证」，回退二维码）
-- [ ] 填入 LLM API Key（DeepSeek 或其它）→ 对话可用
-- [ ] 群聊 @ 触发回复、上下文连续、模型切换（`/provider`、`/model`）、主动插话效果
+- [ ] QQ 私聊实测：主号给 `example` 发消息 → 应收到人设化回复
+- [ ] 测试群：把小号拉进测试群 → 群号填入 `active_reply.whitelist`，验证 @ 回复/上下文/主动插话
 - [ ] 群聊整活实测迭代：按 [group-chat-tuning.md](docs/group-chat-tuning.md) 调概率/上下文/分段
 - [ ] VPS Docker 化部署（资产已就绪，等 VPS 与迁移窗口）
 
@@ -66,10 +68,15 @@ QQ 小号 ⇄ NapCat 4.18.28（NTQQ 协议端，OneBot v11）
 
 ## 6. 模型切换能力
 
-- 任意 OpenAI 兼容服务均可在 AstrBot WebUI「模型提供商」中新增，注入 `key`。
-- 会话内切换：`/provider`（切换 Provider）、`/model`（切换模型），管理员指令；切换结果按会话（umo）持久化。
-- 默认模型在 `data/cmd_config.json` → `agent_runner.config.model.provider_id`。
-- 后续可通过「配置文件（Config Profiles）」实现不同群/不同场景默认不同模型。
+- 已配置两套 provider source（key 均以 `$ENV` 引用，不落盘）：
+  - `deepseek_source` → `https://api.deepseek.com/v1`，模型 `deepseek-chat`（**默认**）
+  - `multi_source` → `https://<GATEWAY_HOST>/v1`（OpenAI 兼容聚合端点），模型：
+    `gemini-3.8-flash`、`claude-sonnet-4-6`、`claude-opus-4-6`、`gpt-6-astra`、`gpt-6.1-sol`
+- 会话内切换：`/provider`、`/model`（管理员指令），按会话持久化；默认模型见
+  `agent_runner.config.model.provider_id`。
+- 冒烟测试：`python scripts/smoke_llm.py --provider <id>`（经 AstrBot WebChat 全链路，见 runbook）。
+- 后续可用「配置文件（Config Profiles）」给不同群设不同默认模型。
+- 新增 provider：WebUI「模型提供商」添加 source + 模型，key 用 `$VAR` 环境变量。
 
 ## 7. 已知问题与技术债
 
