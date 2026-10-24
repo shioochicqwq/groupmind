@@ -34,14 +34,19 @@ QQ 小号 ⇄ NapCat 4.18.28（NTQQ 协议端，OneBot v11）
 - [x] `deploy/windows/start-astrbot.ps1`、`deploy/windows/start-napcat.ps1`：本地启动脚本（加载 `.env`、避免 GBK 日志报错）
 - [x] NapCat 4.18.28 启动成功，WebUI（6099）就绪，已进入扫码登录等待状态
 - [x] AstrBot 反向 WS 端口 6199 已监听
+- [x] 小号 `<BOT_QQ>`（example）扫码登录成功；AstrBot 日志出现「aiocqhttp(OneBot v11) 适配器已连接」
+- [x] `send_private_msg` 实测成功（已发出测试消息），HTTP API / 好友列表可用
+- [x] NapCat 升级 **4.18.28 → 4.18.41**：修复 `PacketBackend 不支持 QQ 9.9.32-51246` 兼容错误（升级后 `PacketHandler 初始化成功`）
+- [x] VPS 部署资产：根目录 `docker-compose.yml`（AstrBot v4.29.1 + NapCat v4.18.41，WebUI 仅绑定 127.0.0.1）、`.env.example`、[deploy/linux/README.md](deploy/linux/README.md)、[docs/migration-vps.md](docs/migration-vps.md)
+- [x] `scripts/backup_data.py` 已实测可打包 `data/`（排除 temp/）
 
 ## 4. 进行中 / 待验证
 
-- [ ] QQ 小号扫码登录（等用户操作）
+- [ ] **NapCat 升级后需重新扫码登录**（快速登录提示「登录需要手Q验证」，回退二维码）
 - [ ] 填入 LLM API Key（DeepSeek 或其它）→ 对话可用
 - [ ] 群聊 @ 触发回复、上下文连续、模型切换（`/provider`、`/model`）
 - [ ] 群聊整活：主动插话、分段回复、表情包/戳一戳、防刷屏
-- [ ] VPS Docker 化部署
+- [ ] VPS Docker 化部署（资产已就绪，等 VPS 与迁移窗口）
 
 ## 5. 关键路径与端口
 
@@ -51,7 +56,7 @@ QQ 小号 ⇄ NapCat 4.18.28（NTQQ 协议端，OneBot v11）
 | AstrBot 数据 | `D:\qqbot\data`（cmd_config.json、data_v4.db、plugins…） |
 | AstrBot WebUI | `http://127.0.0.1:6185`（用户 `astrbot`，初始密码见首次启动日志，登录后必须修改） |
 | AstrBot OneBot 反向 WS | `0.0.0.0:6199`，路径 `/ws` |
-| NapCat 安装 | `D:\Apps\NapCat`（`NapCat.Shell`，QQNT `C:\Program Files\Tencent\QQNT`） |
+| NapCat 安装 | `D:\Apps\NapCat`（升级到 4.18.41，旧版备份 `D:\Apps\NapCat.bak-*`；QQNT `C:\Program Files\Tencent\QQNT`） |
 | NapCat WebUI | `http://127.0.0.1:6099/webui?token=<token>`（token 在 `D:\Apps\NapCat\config\webui.json`） |
 | NapCat OneBot 配置 | `D:\Apps\NapCat\config\onebot11_<QQ号>.json` |
 | 旧抓图脚本接口 | NapCat HTTP server `:3000`，HTTP 上报 `http://127.0.0.1:8080/qq_event`（保留） |
@@ -66,15 +71,16 @@ QQ 小号 ⇄ NapCat 4.18.28（NTQQ 协议端，OneBot v11）
 
 ## 7. 已知问题与技术债
 
-- NapCat 4.18.28 对当前 QQ 9.9.32-51246 报 `未找到对应版本的偏移数据` 与 `Appid未内置` 警告；登录正常，**发消息能力待登录后验证**，必要时升级 NapCat。
+- 本地 NapCat 升级到 4.18.41 后，快速登录（`-q <uin>`）要求手机 QQ 验证，需改回扫码；换机/换版本后扫码是常规路径。
 - Windows 本机不能常驻，当前仅作开发验证；VPS 迁移需重新扫码登录（可能触发设备验证）。
 - AstrBot 升级会带来配置迁移风险：当前锁定 4.29.1，升级前备份 `data/`。
-- NapCat WebUI 默认无访问控制（`accessControlMode: none` 且监听 `::`），VPS 部署必须改用防火墙/仅内网监听。
+- NapCat WebUI 默认无访问控制（`accessControlMode: none` 且监听 `::`），VPS 部署必须改用防火墙/仅内网监听（compose 已绑定 127.0.0.1）。
+- NapCat / QQ 必须以 NapCat 目录为工作目录启动，否则会在仓库根写出 `guild*.db`（启动脚本已 `Set-Location` 修正，gitignore 兜底）。
 - 尚未为「不刷屏/防滥用」做触发与限流调优。
 
 ## 8. 下一步计划
 
-1. 用户扫码登录小号（<ADMIN_QQ> 或 <BOT_QQ>，或其它小号）→ 验证 AstrBot 日志出现「适配器已连接」。
-2. 提供 LLM Key → 在群里 @ 小号测试回复与上下文。
+1. 重新扫码登录小号 `<BOT_QQ>` → 确认 AstrBot 日志「适配器已连接」。
+2. 提供 LLM Key（写入 `.env`）→ 用 AstrBot 内置 Web Chat 验证模型回复，再进群 @ 测试。
 3. 调人格与群聊行为（主动插话、分段、表情、频率限制）。
-4. 准备 `deploy/linux/` Docker Compose + 迁移清单；用户提供 VPS 后部署并观察 24h。
+4. 迁移 VPS：按 [migration-vps.md](docs/migration-vps.md) 走，扫码后用 [deploy/linux/README.md](deploy/linux/README.md) 验收，观察 24h。

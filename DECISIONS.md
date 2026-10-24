@@ -76,5 +76,36 @@
 - **背景**：AstrBot `data/` 包含 WebUI 密码哈希、JWT secret、聊天记录 DB、插件数据；NapCat 配置包含 WebUI token 与 QQ 登录态。
 - **决策**：仓库只提交代码/配置模板/文档；`data/`、`.astrbot`、`.env` 全部 gitignore；密钥以环境变量注入（provider key 使用 `$VAR` 引用）。VPS 迁移时通过加密传输整体迁移 `data/`。
 - **理由**：避免密钥/隐私进 git；配置可整体迁移，不需要在 VPS 重建。
-- **风险**：`data/` 丢失等于配置/记忆全丢 → 需要备份脚本与迁移清单（待补）。
+- **风险**：`data/` 丢失等于配置/记忆全丢 → 需要备份脚本与迁移清单（已补 `scripts/backup_data.py` 与 `docs/migration-vps.md`）。
 - **验证**：`git status` 不含 `data/` 与 `.env`。
+
+## D-007 VPS 部署拓扑：仓库根 Compose、镜像锁定、WebUI 只绑本机
+
+- **日期**：2026-10-24
+- **背景**：本机不能常驻，最终要跑在 Linux VPS；需要可重复、可回滚的部署方式。
+- **调查**：AstrBot 官方 Docker 文档 + NapCat-Docker 的 `compose/astrbot.yml` 模板（NapCat 容器 `MODE=astrbot` 会基于 `/app/templates/astrbot.json` 生成 `onebot11.json`，反向 WS 指向 `ws://astrbot:6199/ws`）。
+- **决策**：
+  - Compose 放在仓库根 `docker-compose.yml`，`name: qqbot`；
+  - 镜像锁定 `soulter/astrbot:v4.29.1`、`mlikiowa/napcat-docker:v4.18.41`（与已验证版本对齐）；
+  - AstrBot WebUI `6185`、NapCat WebUI `6099` 均只绑定 `127.0.0.1`，通过 SSH 隧道访问；`6199` 不对外发布，只在 `qqbot_net` 内部通信；
+  - AstrBot 数据沿用 `./data`（与 Windows 同名目录，整体迁移）；NapCat 状态放 `./runtime/napcat`、`./runtime/ntqq`；
+  - 密钥统一放仓库根 `.env`（Windows 启动脚本与 compose 共用）。
+- **放弃**：在 VPS 上重新初始化 AstrBot（密码/JWT/会话/聊天记录会丢）；把 WebUI 直接暴露公网（风控与安全风险）。
+- **风险**：换机登录触发设备验证；QQ 自动升级导致 NapCat 版本不匹配（见 D-008）；国内 VPS 拉取 Docker Hub 镜像可能需代理。
+- **验证**：`docker compose config` 通过；`up -d` 后 AstrBot 日志出现适配器连接、WebUI 经隧道可访问；`restart: unless-stopped` 自愈。
+
+## D-008 NapCat 版本必须匹配 QQ 版本（本地升级 4.18.28 → 4.18.41）
+
+- **日期**：2026-10-24
+- **背景**：本地 QQNT 已自动升级到 `9.9.32-51246`，而 NapCat 4.18.28 启动后报
+  `PacketBackend 不支持当前QQ版本架构：9.9.32-51246-x64` 与 `NativePacketClient: 未找到对应版本的偏移数据`。
+  虽 `send_private_msg` 当时仍返回成功，但 Packet 后端不可用意味着群消息、媒体、部分 API 的可靠性存疑。
+- **调查**：NapCat GitHub releases——
+  - `v4.18.34` 发布说明明确「补齐 Windows QQ **9.9.32-51246、9.9.33-51802（x64）** 的兼容映射」；
+  - 最新版 `v4.18.41`（2026-10-21），Docker Hub 有对应镜像 tag。
+- **决策**：
+  - 本地把 NapCat 升级到 **v4.18.41**（保留 `config/`，旧安装备份在 `D:\Apps\NapCat.bak-20261024-165715`）；
+  - VPS 固定 `mlikiowa/napcat-docker:v4.18.41`；
+  - 以后 QQ 自动更新后若再出现 Packet/偏移告警，先查 NapCat release 的兼容表，再升级 NapCat。
+- **风险**：NapCat 升级会改变设备指纹/登录态，快速登录（`-q <uin>`）提示「登录需要手Q验证」，需回退扫码；QQ 自动更新可能再次超出兼容范围。
+- **验证**：升级后日志 `[PacketHandler] 初始化成功`、无 `PacketBackend 不支持`；登录 + 发送消息实测通过（本次升级前已实测私聊发送成功，升级待重新扫码后复测）。

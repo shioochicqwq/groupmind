@@ -3,6 +3,15 @@
 /.astrbot
 /astrbot.lock
 
+# VPS runtime state (NapCat config + QQ login state), backups
+/runtime/
+/backups/
+
+# NapCat/QQ leak artifacts if launched from the repo root by mistake
+/guild*.db
+/guild*.db-shm
+/guild*.db-wal
+
 # Local secrets
 .env
 *.local.ps1

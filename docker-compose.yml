@@ -1,0 +1,54 @@
+# AstrBot + NapCat (OneBot v11) production stack for a Linux VPS.
+#
+# Deploy: see deploy/linux/README.md and docs/migration-vps.md
+# Secrets: repository-root .env (gitignored), see .env.example
+#
+# Ports are bound to 127.0.0.1 on purpose; reach the web UIs through an SSH
+# tunnel instead of exposing them to the internet:
+#   ssh -L 6185:127.0.0.1:6185 -L 6099:127.0.0.1:6099 user@vps
+name: qqbot
+
+services:
+  astrbot:
+    image: soulter/astrbot:v4.29.1   # pinned to match the validated local version
+    container_name: astrbot
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      - TZ=Asia/Shanghai
+      # Provider keys are referenced from data/cmd_config.json as $DEEPSEEK_API_KEY
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
+    volumes:
+      - ./data:/AstrBot/data
+      - /etc/localtime:/etc/localtime:ro
+    ports:
+      - "127.0.0.1:6185:6185"   # AstrBot WebUI
+    networks:
+      - qqbot_net
+
+  napcat:
+    image: mlikiowa/napcat-docker:v4.18.41
+    container_name: napcat
+    restart: unless-stopped
+    depends_on:
+      - astrbot
+    environment:
+      - TZ=Asia/Shanghai
+      - NAPCAT_UID=${NAPCAT_UID:-1000}
+      - NAPCAT_GID=${NAPCAT_GID:-1000}
+      # MODE=astrbot generates napcat/config/onebot11.json with a reverse-WS
+      # client to ws://astrbot:6199/ws (service name on this network).
+      - MODE=astrbot
+      - WEBUI_TOKEN=${NAPCAT_WEBUI_TOKEN:?set NAPCAT_WEBUI_TOKEN in .env}
+    volumes:
+      - ./runtime/napcat:/app/napcat/config
+      - ./runtime/ntqq:/app/.config/QQ
+    ports:
+      - "127.0.0.1:6099:6099"   # NapCat WebUI (login QR)
+    networks:
+      - qqbot_net
+
+networks:
+  qqbot_net:
+    driver: bridge

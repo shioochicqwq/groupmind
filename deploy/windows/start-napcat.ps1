@@ -1,9 +1,14 @@
 # Start NapCat (NTQQ protocol side) on Windows.
 # Mirrors D:\Apps\NapCat\启动NapCat.bat but without its interactive `pause`,
 # so it can run as a background job / scheduled task.
-# Usage: pwsh -File deploy/windows/start-napcat.ps1
+#
+# Usage:
+#   pwsh -File deploy/windows/start-napcat.ps1
+#   pwsh -File deploy/windows/start-napcat.ps1 -KillExisting
+#   pwsh -File deploy/windows/start-napcat.ps1 -QuickLogin <BOT_QQ>
 param(
-    [switch]$KillExisting
+    [switch]$KillExisting,
+    [string]$QuickLogin = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -20,9 +25,13 @@ foreach ($p in @($qq, $launcher, $hook, (Join-Path $napcat 'napcat.mjs'))) {
 }
 
 if ($KillExisting) {
-    Get-Process -Name 'QQ' -ErrorAction SilentlyContinue | Stop-Process -Force
+    Get-Process -Name 'QQ', 'NapCatWinBootMain' -ErrorAction SilentlyContinue | Stop-Process -Force
     Start-Sleep -Seconds 2
 }
+
+# QQ/NapCat write runtime files (guild*.db, cache) relative to the working
+# directory, so make sure that is the NapCat install dir, not the repo.
+Set-Location $napcat
 
 $env:NAPCAT_PATCH_PACKAGE = Join-Path $napcat 'qqnt.json'
 $env:NAPCAT_LOAD_PATH = $load
@@ -36,5 +45,9 @@ Set-Content -Path $load -Value "(async () => {await import(""file:///$main"")})(
 $env:PYTHONIOENCODING = 'utf-8'
 chcp 65001 > $null
 
+# Extra positional arg (QQ uin) = quick login without scanning a QR code.
+$launchArgs = @($qq, $hook)
+if ($QuickLogin) { $launchArgs += $QuickLogin }
+
 # Runs in the foreground; NapCat logs (including the login QR) go to stdout.
-& $launcher $qq $hook
+& $launcher @launchArgs
