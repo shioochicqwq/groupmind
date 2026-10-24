@@ -1,8 +1,10 @@
 """Bootstrap local AstrBot config for NapCat (OneBot v11) + DeepSeek.
 
-Idempotent: safe to re-run. API keys are NOT written into the config file;
-instead the provider references the environment variable ``DEEPSEEK_API_KEY``
-(AstrBot expands ``$VAR`` entries at load time). Put real keys in ``.env``.
+Idempotent: safe to re-run. Provider API keys are NOT written into the config
+file; providers reference ``$VAR`` entries expanded by AstrBot, with real keys
+in ``.env``. Exception: AstrBot's web-search key (``websearch_deepseek_key``)
+has no env-ref support, so it is written literally from ``.env`` into the
+gitignored ``data/cmd_config.json``.
 
 Usage:
     python scripts/bootstrap_astrbot_config.py
@@ -16,6 +18,19 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 CFG_PATH = ROOT / "data" / "cmd_config.json"
+ENV_PATH = ROOT / ".env"
+
+
+def load_dotenv(path: Path) -> None:
+    """Load simple KEY=VALUE lines into os.environ (existing env wins)."""
+    if not path.is_file():
+        return
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        name, value = line.split("=", 1)
+        os.environ.setdefault(name.strip(), value.strip().strip("'\""))
 
 
 def upsert(items: list[dict], item: dict) -> None:
@@ -28,6 +43,7 @@ def upsert(items: list[dict], item: dict) -> None:
 
 
 def main() -> None:
+    load_dotenv(ENV_PATH)
     # AstrBot reads/writes this file as utf-8-sig (BOM); match it.
     cfg = json.loads(CFG_PATH.read_text(encoding="utf-8-sig"))
 
@@ -114,6 +130,19 @@ def main() -> None:
             },
         )
 
+    # --- 联网搜索：复用 DeepSeek 的 tools/search（无需额外 key） ---
+    pset = cfg.setdefault("provider_settings", {})
+    pset["web_search"] = True
+    pset["websearch_provider"] = "deepseek"
+    # 注意：AstrBot 的 websearch key 不支持 $ENV 引用，只能写实际值（data/ 已 gitignore）。
+    deepseek_key = os.environ.get("DEEPSEEK_API_KEY", "").strip()
+    pset["websearch_deepseek_key"] = [deepseek_key] if deepseek_key else []
+    pset["web_search_link"] = True
+
+    # --- 多模态：用视觉模型给图片做 caption，文本模型也能"看图" ---
+    pset["default_image_caption_provider_id"] = "gemini-3.8-flash"
+    pset["image_caption_prompt"] = "用中文简短描述这张图片的关键内容（一句话）。"
+
     # --- 管理员：Dashboard 用户名 + QQ 主号（/provider、/model 等管理员指令需要） ---
     admins = cfg.setdefault("admins_id", ["astrbot"])
     for admin in ("astrbot", "<ADMIN_QQ>"):
@@ -126,6 +155,9 @@ def main() -> None:
     ltm["group_message_history_max_cnt"] = 200
     ltm["group_icl_enable"] = True
     ltm["group_message_max_cnt"] = 200
+    # 群聊上下文里的图片用视觉模型做描述（需要 image_caption_provider_id）
+    ltm["image_caption"] = True
+    ltm["image_caption_provider_id"] = "gemini-3.8-flash"
     ltm["active_reply"] = {
         # 测试群确认前保持关闭：当前小号所在群不是测试群，避免误插话。
         # 等有测试群后改为 True，并把群号填进 whitelist。

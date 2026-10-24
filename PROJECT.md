@@ -48,6 +48,10 @@ QQ 小号 ⇄ NapCat 4.18.28（NTQQ 协议端，OneBot v11）
 - [x] 私聊/群聊测试链路已具备：QQ 消息 → NapCat → AstrBot（人设 example + 多模型）
 - [x] VPS 部署方案改为**原生 systemd（不使用 Docker）**：`deploy/linux/native/`（README + 两个 systemd 单元），迁移清单同步更新；Docker Compose 降级为可选 fallback（D-011）
 - [x] 一键体检脚本 `scripts/healthcheck.py`（跨平台，实测全 PASS）：端口、NapCat 登录/在线、平台适配器、6 provider、人格
+- [x] **联网搜索**：启用 `web_search_deepseek`（复用 DeepSeek key），WebChat 实测能检索并回答时效问题（如 V4 发布日期）
+- [x] **多模态**：图片 caption 用 `gemini-3.8-flash`（视觉模型），群聊上下文图片会转中文描述；聚合端点视觉输入已直连验证
+- [x] **Skill 体系**：仓库 `skills/` 源 + `scripts/install_skill.py` 安装；示例技能 `web-lookup` 已安装并生效；开发指南 [docs/skills-dev.md](docs/skills-dev.md)
+- [x] **插件层**：仓库 `plugins/` + `scripts/install_plugin.py`；`astrbot_plugin_strip_refs` 移除 QQ 里难看的 `<ref>` 引用标记（非流式路径已验证）
 
 ## 4. 进行中 / 待验证
 
@@ -113,17 +117,23 @@ QQ 小号 ⇄ NapCat 4.18.28（NTQQ 协议端，OneBot v11）
 - 尚未做刷屏/被举报的线上观察，限流与主动插话概率需要实群调参。
 - **内存容量风险（2026-10-24 实测）**：AstrBot RSS ≈ 264 MB，QQ 相关进程合计 ≈ 1.8 GB（Electron 多进程），
   NapCat 方案在 2 GB VPS 上会很紧；建议 ≥4 GB 或改官方 QQ 机器人（能力受限），见 D-011。
+- **搜索 key 特殊处理（临时）**：AstrBot 的 `websearch_deepseek_key` 不支持 `$ENV` 引用，bootstrap 会把
+  `DEEPSEEK_API_KEY` 的实际值写进 gitignored 的 `data/cmd_config.json`（provider key 仍是 `$ENV` 引用）。
+- 引用标记 `<ref>`：联网搜索会自动要求模型输出 `<ref>`，已通过插件在发送前剥离（WebChat 流式模式仍会显示，QQ 非流式路径已清理）。
+- 图片 caption 会额外消耗视觉模型 token；主动插话仍关闭，等测试群。
 
 ## 8. 下一步计划
 
-1. **本地调优优先（用户决定：VPS 暂缓，调好再说）**：人设/群聊行为迭代，评测脚本见
-   [persona-eval.md](docs/persona-eval.md)；等有测试群后再验收群聊与主动插话。
+1. **本地调优优先（用户决定：VPS 暂缓，调好再说）**：
+   - 按用户方向迭代「上下文管理 / 多模态 / 联网搜索」相关体验；
+   - 支持用户自写 Skill：`skills/` + [docs/skills-dev.md](docs/skills-dev.md) + `install_skill.py`；
+   - 人设/群聊行为继续用 [persona-eval.md](docs/persona-eval.md) 评测。
 2. 群聊验收：等有合适的测试群后，把群号填入 `active_reply.whitelist` 并开启 `active_reply.enable`，
    按 [group-chat-tuning.md](docs/group-chat-tuning.md) 调参。
 3. VPS 部署（暂缓）：按 [deploy/linux/native/README.md](deploy/linux/native/README.md) 与
    [migration-vps.md](docs/migration-vps.md) 执行；海外 VPS 注意 QQ 风控与内存上限（D-011）。
 4. 安全收尾：WebUI 初始密码改为强密码；LLM key 使用一段时间后轮换。
-5. 可选增强（按需）：表情包/戳一戳插件、图片理解（image caption）、主动插话升级（smart_wake 类）。
+5. 可选增强（按需）：表情包/戳一戳插件、技能市场调研、主动插话升级（smart_wake 类）。
 
 ## 9. 变更记录
 
@@ -188,4 +198,13 @@ QQ 小号 ⇄ NapCat 4.18.28（NTQQ 协议端，OneBot v11）
   平均 16.4 / 23.6 字，0 超长、0 AI 自指、0 Markdown；结论与样例见 [docs/persona-eval.md](docs/persona-eval.md)；
 - 默认模型保持 deepseek，新增失败回退 `gemini-3.8-flash`；
 - **主动插话改为默认关闭**（小号所在群非测试群，避免误插话），开启条件写入调参文档；
-- 记录未测项：图片理解未开、分段实际频率、真实群上下文与主动插话。
+- 当轮未测项：图片理解未开、分段实际频率、真实群上下文与主动插话。
+
+### A-10（2026-10-24）上下文/多模态/联网搜索 + Skill 与插件体系
+
+- 联网搜索：启用 `web_search_deepseek`（复用 DeepSeek `tools/search`，直连实测通过），WebChat 实测能检索并回答时效问题；
+- 多模态：图片 caption 改用 `gemini-3.8-flash`（视觉），`default_image_caption_provider_id` + 群聊 `image_caption` 均开启；聚合端点视觉输入直连验证通过；
+- Skill：新增 `skills/web-lookup/SKILL.md` + `scripts/install_skill.py`，技能已安装并由 WebUI API 确认；编写指南 `docs/skills-dev.md`；
+- 插件：新增 `plugins/astrbot_plugin_strip_refs` + `scripts/install_plugin.py`，剥离 QQ 回复里的 `<ref></ref>`（非流式路径验证）；
+- `smoke_llm.py` 增加 `--no-stream`（更接近 QQ 非流式路径，用于验证装饰/发送阶段行为）；
+- 已知临时 workaround：websearch key 不支持 `$ENV`，实际值落在 gitignored 的 cmd_config.json。

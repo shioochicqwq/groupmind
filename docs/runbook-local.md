@@ -102,6 +102,22 @@ python scripts\healthcheck.py
 检查：4 个端口、NapCat 登录/在线状态、AstrBot 平台适配器、6 个 LLM provider、人格。
 全部 PASS 退出码为 0；任何 FAIL 退出码 1（VPS 上同样适用，日志用 journalctl 对照）。
 
+## 联网搜索 / 多模态 / Skill / 插件
+
+```powershell
+# 安装仓库里的 skills 和 plugins 到 data/（gitignored），然后重启 AstrBot
+python scripts\install_skill.py --force
+python scripts\install_plugin.py --force
+
+# 联网搜索验证（--no-stream 更接近 QQ 非流式路径）
+$env:ASTRBOT_DASHBOARD_PASSWORD='<WebUI 密码>'
+python scripts\smoke_llm.py --provider deepseek --no-stream --message "帮我查一下 DeepSeek V4 哪天发布的"
+```
+
+- 联网搜索：`web_search_deepseek`，复用 `DEEPSEEK_API_KEY`；新增 Skill 见 [skills-dev.md](skills-dev.md)。
+- 多模态：图片 caption 用 `gemini-3.8-flash`，群聊图片会转一句中文描述（消耗视觉 token）。
+- 引用标记 `<ref>` 由插件 `astrbot_plugin_strip_refs` 在发送前剥离（仅非流式；QQ 正常生效）。
+
 ## 群聊测试
 
 - 小号加入测试群（建议自己建的小群）；

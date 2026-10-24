@@ -1,0 +1,4 @@
+name: astrbot_plugin_strip_refs
+desc: Strip <ref></ref> web-search citation tags from outgoing replies (QQ display friendly).
+author: qqbot
+version: 0.1.0

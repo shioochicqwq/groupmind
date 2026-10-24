@@ -180,3 +180,41 @@
 - **验证**：`deploy/linux/native/` 下的 README 与 systemd 单元为待执行清单；
   在 VPS 上完成扫码 + `journalctl` 出现「适配器已连接」后回填实测数据。
 - **代码位置**：`deploy/linux/native/`、`docs/migration-vps.md`、`deploy/linux/README.md`。
+
+## D-012 上下文 / 多模态 / 联网搜索 / Skill 与插件体系
+
+- **日期**：2026-10-24
+- **背景**：用户下一阶段方向是「上下文管理、多模态、联网搜索这一类」，并计划自己编写 Skill；
+  要求不碰核心（D-002），实现尽量复用 AstrBot 已有能力。
+- **调查**：
+  - AstrBot 内置联网搜索工具（`web_search_deepseek` → `https://api.deepseek.com/v1/tools/search`、
+    `deepseek_fetch_web_page`），激活条件 `provider_settings.web_search=true` + `websearch_provider=deepseek`，
+    可复用现有 DeepSeek key，无需第三方搜索服务；功能工具里还有 `get_group_message_history`（群上下文）、
+    `send_message_to_user`（主动消息）；
+  - 多模态：`default_image_caption_provider_id` + `provider_ltm_settings.image_caption` 可用视觉模型给图片生成描述，
+    让文本模型（deepseek）也能"看图"；
+  - Skill：标准 `SKILL.md`（YAML frontmatter 仅 `name`/`description`，兼容 Codex/Claude），
+    本地技能目录 `data/skills/<name>/`；仓库可版本化 `skills/`；
+  - 插件层：`@filter.on_decorating_result()` 可在发送前改结果链，适合剥离 `<ref>` 标记。
+- **决策**：
+  - 联网搜索：`websearch_provider=deepseek`、`web_search_link=true`，WebChat 实测通过；
+  - 多模态：`default_image_caption_provider_id=gemini-3.8-flash`、群聊 `image_caption=true`（视觉输入直连验证通过）；
+  - Context：群聊 ICL 200 条 + `get_group_message_history` 工具 + AstrBot 自动上下文压缩；主动插话保持关闭；
+  - Skill：仓库 `skills/` + `scripts/install_skill.py` + 示例 `web-lookup` + 指南 `docs/skills-dev.md`；
+  - 插件：仓库 `plugins/` + `scripts/install_plugin.py` + `astrbot_plugin_strip_refs`（`on_decorating_result` 剥离 `<ref>`）。
+- **理由**：全部走 AstrBot 既有工具/生命周期，核心零修改；Skill 与插件作为可版本化资产，便于 review 与迁移 VPS。
+- **放弃**：自建搜索代理（DeepSeek 搜索 key 已够用）；改核心去掉 citation prompt（插件层可解决）；开 sandbox（内存不够）。
+- **风险 / 临时 workaround**：
+  - AstrBot 的 `websearch_deepseek_key` **不支持 `$ENV` 引用**，bootstrap 只能把实际 key 写入 gitignored 的
+    `data/cmd_config.json`（provider key 仍走 `$ENV`）。**移除条件**：AstrBot 支持 websearch key 环境变量引用后改回。
+  - `<ref>` 剥离只在**非流式**发送路径生效（stage 注释明确流式下插件可能不工作）；QQ/OneBot 是非流式，符合预期；
+    WebChat 流式测试仍会看到 `<ref>`。
+  - 图片 caption 会额外消耗视觉模型 token；sandbox 工具（shell/browser）在 `computer_use_runtime=none` 下不可用，
+    Skill 只能依赖内置 function tools。
+- **验证**：
+  - 直接 `POST api.deepseek.com/v1/tools/search` 返回结果；WebChat 问答能引用 2026-04-24 等新信息；
+  - 聚合端点视觉输入直连返回图片描述；
+  - `GET /api/v1/skills` 列出 `web-lookup`；`find` 安装脚本幂等；
+  - 非流式 WebChat 回复中不再出现 `<ref>`（3 次查询验证）。
+- **代码位置**：`scripts/bootstrap_astrbot_config.py`、`skills/web-lookup/`、`plugins/astrbot_plugin_strip_refs/`、
+  `scripts/install_skill.py`、`scripts/install_plugin.py`、`docs/skills-dev.md`。

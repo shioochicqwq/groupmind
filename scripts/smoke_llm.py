@@ -92,6 +92,11 @@ def main() -> int:
     parser.add_argument("--provider", default="", help="selected_provider id, empty = default")
     parser.add_argument("--message", default="用一句话介绍你自己，别超过 30 字")
     parser.add_argument(
+        "--no-stream",
+        action="store_true",
+        help="disable WebChat streaming (closer to QQ/OneBot non-streaming path)",
+    )
+    parser.add_argument(
         "--followup",
         default="",
         help="optional second message in the SAME session (tests multi-turn context)",
@@ -116,12 +121,16 @@ def main() -> int:
         payload = {"message": args.message, "session_id": sid}
         if args.provider:
             payload["selected_provider"] = args.provider
+        if args.no_stream:
+            payload["flags"] = {"enable_streaming": False}
         reply, errors = stream_reply(args.dashboard, payload, token)
         followup_reply = ""
         if args.followup:
             payload2 = {"message": args.followup, "session_id": sid}
             if args.provider:
                 payload2["selected_provider"] = args.provider
+            if args.no_stream:
+                payload2["flags"] = {"enable_streaming": False}
             followup_reply, errors2 = stream_reply(args.dashboard, payload2, token)
             errors.extend(errors2)
     except urllib.error.HTTPError as exc:
