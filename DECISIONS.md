@@ -125,3 +125,18 @@
 - **放弃**：首版直接上 `smart_wake`（多一层模型判定与配置，增加调试变量）；自写主动插话插件（无必要）。
 - **风险**：3% 是全局概率，多群时会到处插话——先低概率并尽快填白名单；ICL 注入增加 token 成本；人设是否「像群友」需实群迭代。
 - **验证**：见 `docs/group-chat-tuning.md` 验收清单；AstrBot 重启日志已确认 `Loaded 2 personas` 与 `Segmented-reply interval: [1.5, 3.5]`。
+
+## D-010 多模型接入：DeepSeek 官方 + OpenAI 兼容聚合端点（密钥走环境变量）
+
+- **日期**：2026-10-24
+- **背景**：用户明确要求「能更换各种模型」，提供了两个凭据：DeepSeek 官方 key、以及一个 OpenAI 兼容聚合端点（`https://<GATEWAY_HOST>/v1`，提供 gemini/claude/gpt 共 5 个模型）。
+- **决策**：
+  - `provider_sources` 配两个 source：`deepseek_source`（api.deepseek.com）与 `multi_source`（聚合端点）；
+  - 聚合端点注册 5 个 provider：`gemini-3.8-flash`、`claude-sonnet-4-6`、`claude-opus-4-6`、`gpt-6-astra`、`gpt-6.1-sol`；
+  - 默认模型仍为 `deepseek-chat`（便宜稳定），其余按会话用 `/provider`、`/model` 切换；
+  - 所有 key 以 `$DEEPSEEK_API_KEY` / `$MULTI_API_KEY` 引用，实际值只在 gitignored `.env`；
+  - 新增 `scripts/smoke_llm.py`：经 AstrBot WebChat 全链路验证任意 provider（登录→建会话→SSE 流式回复）。
+- **理由**：复用 AstrBot 多 provider 机制，零自研路由；一个聚合 key 覆盖多家模型；默认模型与实验模型分离，避免群聊被不稳定端点拖累。
+- **放弃**：只接一个模型（不满足需求）；key 写进 `cmd_config.json`（配置易被备份/提交泄漏）。
+- **风险**：第三方聚合端点的稳定性与隐私（请求经第三方转发），敏感对话不应走该端点；密钥曾出现在对话和 QQ 消息中，**建议使用一段时间后轮换**。
+- **验证**：AstrBot 启动日志成功加载 6 个 provider 并选中 deepseek 为默认；`smoke_llm.py` 实测 `deepseek`、`gemini-3.8-flash`、`claude-sonnet-4-6` 均返回人设化回复（无报错）。
