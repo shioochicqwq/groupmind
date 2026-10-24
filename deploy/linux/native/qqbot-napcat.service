@@ -1,0 +1,30 @@
+[Unit]
+Description=NapCat (QQ protocol side, OneBot v11) + bundled QQ via Xvfb
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=qqbot
+Group=qqbot
+WorkingDirectory=/opt/napcat
+Environment=TZ=Asia/Shanghai
+# xvfb-run provides a headless DISPLAY; adjust FUSE vs extract-and-run as needed.
+ExecStart=/usr/bin/xvfb-run -a /opt/napcat/NapCat.AppImage --appimage-extract-and-run
+Restart=always
+RestartSec=10
+
+# QQ is Electron; give it more headroom than AstrBot but still cap it.
+MemoryAccounting=yes
+MemoryMax=1100M
+CPUWeight=50
+IOWeight=50
+Nice=10
+
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=read-only
+ReadWritePaths=/opt/napcat
+
+[Install]
+WantedBy=multi-user.target

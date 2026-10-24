@@ -1,98 +1,101 @@
-# 迁移清单：Windows 本地 → Linux VPS
+# 迁移清单：Windows 本地 → Linux VPS（原生 systemd，无 Docker）
 
-> 原则：**整体迁移 `data/` 目录，不做"VPS 上重新初始化"**。AstrBot 的 WebUI 密码、JWT、聊天记录、插件配置都在里面。
-> 决策背景见 `DECISIONS.md` D-005 / D-007。
+> 原则：**整体迁移 AstrBot 的 `data/` 目录**，不在 VPS 上重新初始化（WebUI 密码、JWT、会话、插件配置都在里面）。
+> 部署方式与选型：`DECISIONS.md` D-005 / D-011；原生步骤：`deploy/linux/native/README.md`。
+> 风险：海外 VPS 上 QQ 协议端风控更严，扫码后可能还要手机验证。
 
-## 0. 迁移前检查（本地）
+## 0. 迁移前检查
 
-- [ ] 本地 AstrBot 已能正常启动、群聊可用（最低限度：provider 可用、WS 已连接）
-- [ ] `python scripts/backup_data.py` 本地备份成功，并能在别处解压
-- [ ] 记录当前版本：AstrBot `v4.29.1`、NapCat `4.18.28`（本地）/ 目标镜像 `v4.18.41`
-- [ ] VPS 已装 Docker + Compose，`docker compose version` 正常
-- [ ] VPS 能拉取 `soulter/astrbot:v4.29.1` 和 `mlikiowa/napcat-docker:v4.18.41`
-      （国内 VPS 需要镜像加速或代理；拉取失败时在 Docker daemon 配代理）
-- [ ] VPS 时间同步正常（`date`；容器用 `TZ=Asia/Shanghai`）
-- [ ] 专用小号的手机号/密保可用，能完成可能出现的设备验证
+- [ ] 本地私聊链路已验收（2026-10-24 已通过）
+- [ ] `python scripts/backup_data.py` 本地备份成功
+- [ ] VPS：Debian/Ubuntu、≥2 GB 内存（建议配 2 GB swap）、≥3 GB 磁盘
+- [ ] VPS 已装：`python3 curl git xvfb xauth libfuse2 rsync`，已装 `uv`
+- [ ] 专用用户 `qqbot`，目录 `/opt/qqbot`、`/opt/napcat`
+- [ ] 记录版本：AstrBot `4.29.1`；NapCat Linux AppImage `v4.18.41`（内含 QQ build 53644）
 
 ## 1. 本地停服并打包
 
 ```powershell
-# 本地：停 AstrBot（关闭运行它的终端进程）与 NapCat（结束 QQ.exe / NapCatWinBootMain.exe）
+# 停 AstrBot（结束运行它的进程）与 NapCat（结束 QQ.exe / NapCatWinBootMain.exe）
 cd D:\qqbot
 python scripts\backup_data.py --out D:\qqbot\backups
-# 产物：D:\qqbot\backups\data-YYYYmmdd-HHMMSS.zip
+# 产物：backups\data-YYYYmmdd-HHMMSS.zip；.env 默认不入包
 ```
 
-不要把 `.env` 打进包里（默认排除）；`.env` 单独安全传递或在 VPS 上重新填写。
-
-## 2. 上传到 VPS
+## 2. 上传
 
 ```bash
-# VPS 上
-sudo mkdir -p /opt/qqbot && sudo chown "$USER":"$USER" /opt/qqbot
-# 上传代码（不含 data/）
-rsync -av --exclude data --exclude runtime --exclude .env --exclude .git \
-      ./ user@vps:/opt/qqbot/
-# 上传数据包
+# 本机（Windows 可用 scp / rsync via WSL，或用 VPS 面板上传）
 scp backups/data-YYYYmmdd-HHMMSS.zip user@vps:/opt/qqbot/
+rsync -av --exclude data --exclude .env --exclude .git --exclude tmp \
+      ./ user@vps:/opt/qqbot/
 ```
 
-## 3. VPS 上还原
+## 3. VPS 上安装（摘要，完整步骤见 deploy/linux/native/README.md）
 
 ```bash
-cd /opt/qqbot
-unzip -o data-YYYYmmdd-HHMMSS.zip        # 得到 ./data/
-cp .env.example .env
-# 编辑 .env：DEEPSEEK_API_KEY、MULTI_API_KEY、NAPCAT_WEBUI_TOKEN（openssl rand -hex 16）、NAPCAT_UID/GID
-mkdir -p runtime/napcat runtime/ntqq
-chown -R "${NAPCAT_UID:-1000}:${NAPCAT_GID:-1000}" runtime
-docker compose pull
-docker compose up -d
-docker compose ps
-docker compose logs -f astrbot
+# 3.1 依赖 + 用户
+sudo apt update && sudo apt install -y python3 curl git xvfb xauth libfuse2 rsync
+sudo useradd -m -s /bin/bash qqbot || true
+sudo mkdir -p /opt/qqbot /opt/napcat && sudo chown -R qqbot:qqbot /opt/qqbot /opt/napcat
+
+# 3.2 AstrBot（qqbot 用户）
+sudo -iu qqbot bash -lc 'curl -LsSf https://astral.sh/uv/install.sh | sh'
+sudo -iu qqbot bash -lc 'export PATH=$HOME/.local/bin:$PATH && uv tool install astrbot --python 3.12'
+
+# 3.3 还原数据 + .env
+cd /opt/qqbot && unzip -o data-YYYYmmdd-HHMMSS.zip
+sudo -u qqbot cp .env.example .env   # 填入 DEEPSEEK_API_KEY / MULTI_API_KEY
+sudo chmod 600 .env
+sudo -u qqbot python3 - <<'PY'
+import json, pathlib
+p = pathlib.Path("/opt/qqbot/data/cmd_config.json")
+cfg = json.loads(p.read_text(encoding="utf-8-sig"))
+cfg["dashboard"]["host"] = "127.0.0.1"
+p.write_text(json.dumps(cfg, ensure_ascii=False, indent=2) + "\n", encoding="utf-8-sig")
+PY
+
+# 3.4 NapCat AppImage
+sudo -iu qqbot bash -lc 'cd /opt/napcat && curl -fL -o NapCat.AppImage https://github.com/NapNeko/NapCatAppImageBuild/releases/download/v4.18.41/QQ-53644_NapCat-v4.18.41-amd64.AppImage && chmod +x NapCat.AppImage'
+
+# 3.5 systemd
+sudo cp /opt/qqbot/deploy/linux/native/qqbot-*.service /etc/systemd/system/
+sudo systemctl daemon-reload && sudo systemctl enable --now qqbot-astrbot qqbot-napcat
 ```
-
-核对：
-
-- AstrBot 日志无 provider 报错（有 key 时不应出现 `Missing credentials`）
-- `docker compose logs napcat` 出现 WebUI 地址与二维码
-- `data/cmd_config.json` 内容与本地一致（`platform` 中 aiocqhttp 端口 6199）
 
 ## 4. 扫码登录（关键步骤）
 
 ```bash
-# 本地机器
+# 本机
 ssh -L 6185:127.0.0.1:6185 -L 6099:127.0.0.1:6099 user@vps
 ```
 
-浏览器打开 `http://127.0.0.1:6099/webui?token=<NAPCAT_WEBUI_TOKEN>`，用专用小号扫码。
+浏览器打开 `http://127.0.0.1:6099/webui`，用小号扫码。
 
-**预期风险**：换设备/换 IP 登录可能触发设备验证或临时风控。建议：
-
-- 迁移窗口内不要在手机端重复上下线小号
-- 若出现验证，按手机 QQ 提示完成，再等待二维码刷新
-- 登录成功后先观察 10–30 分钟再拉群测试
+- 海外 IP 可能触发手机验证/设备验证，按提示完成并等待二维码刷新；
+- 登录成功后确认 `/opt/napcat/config/onebot11*.json` 有指向 `ws://127.0.0.1:6199/ws` 的客户端
+ （没有就跑 `python3 scripts/patch_napcat_onebot.py /opt/napcat/config`）。
 
 ## 5. 验收
 
-- [ ] AstrBot 日志：`aiocqhttp(OneBot v11) 适配器已连接`
-- [ ] NapCat 生成了 `runtime/napcat/onebot11_<QQ号>.json`，URL 为 `ws://astrbot:6199/ws`
-- [ ] 测试群 @ 小号有回复，上下文连续
-- [ ] `/provider`、`/model` 可切换（管理员）
-- [ ] `docker compose restart` 后自动恢复（napcat + astrbot 均 `restart: unless-stopped`）
-- [ ] 服务器重启后容器自动拉起
+- [ ] `journalctl -u qqbot-astrbot | grep 适配器已连接`
+- [ ] `journalctl -u qqbot-astrbot | grep "Loading model"` 显示 6 个 provider
+- [ ] 私聊发一句「在吗」能回复（与本地一致）
+- [ ] `systemctl restart qqbot-astrbot qqbot-napcat` 后自动恢复
+- [ ] VPS 重启后服务自动拉起（`systemctl is-enabled`）
+- [ ] 内存：`systemd-cgtop` / `systemctl status` 观察未触顶；必要时调 `MemoryMax`
+- [ ] 编译任务前 `systemctl stop qqbot-napcat qqbot-astrbot`，避免争抢内存
 
 ## 6. 回滚
 
 ```bash
-cd /opt/qqbot
-docker compose down
-unzip -o /path/to/backup-before-migration.zip -d .
-docker compose up -d
+sudo systemctl disable --now qqbot-astrbot qqbot-napcat
+# 恢复旧备份 data/ 或直接在本地继续运行（本地实例保留到 VPS 稳定运行 24h 再停）
 ```
 
 ## 7. 迁移后待办
 
-- [ ] 配置每日备份 cron（`scripts/backup_data.py`）
-- [ ] 关闭 NapCat WebUI 公网绑定（compose 已默认 `127.0.0.1`，不要改成 0.0.0.0）
-- [ ] 观察 24h，确认无掉线/风控；再关闭本地旧实例
+- [ ] 每日备份 cron：`python3 scripts/backup_data.py --root /opt/qqbot --out /var/backups/qqbot`
+- [ ] SSH 防火墙只开 22；6185/6099 不对外
+- [ ] 观察 24h：掉线、内存、QQ 风控
+- [ ] 本地旧实例停用（VPS 稳定后）

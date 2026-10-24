@@ -1,6 +1,12 @@
-# AstrBot + NapCat (OneBot v11) production stack for a Linux VPS.
+# OPTIONAL FALLBACK — Docker Compose stack for AstrBot + NapCat.
 #
-# Deploy: see deploy/linux/README.md and docs/migration-vps.md
+# NOT the chosen deployment for this project: the target VPS is memory/disk
+# constrained and also used for builds, so the primary path is native systemd
+# services (see deploy/linux/native/README.md). Docker is kept here only as a
+# fallback if resources allow. Decision history: DECISIONS.md D-011 supersedes D-007.
+#
+# Run from the repository root:
+#   docker compose --env-file .env -f deploy/linux/docker-compose.yml up -d
 # Secrets: repository-root .env (gitignored), see .env.example
 #
 # Ports are bound to 127.0.0.1 on purpose; reach the web UIs through an SSH
@@ -21,7 +27,7 @@ services:
       - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
       - MULTI_API_KEY=${MULTI_API_KEY:-}
     volumes:
-      - ./data:/AstrBot/data
+      - ../../data:/AstrBot/data
       - /etc/localtime:/etc/localtime:ro
     ports:
       - "127.0.0.1:6185:6185"   # AstrBot WebUI

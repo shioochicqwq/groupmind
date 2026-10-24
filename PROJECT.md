@@ -23,7 +23,9 @@ QQ 小号 ⇄ NapCat 4.18.28（NTQQ 协议端，OneBot v11）
 - **NapCat** 复用本机既有安装 `D:\Apps\NapCat`（原先用于 QQ 群图片抓取脚本），其 HTTP 服务 3000 端口和到 `127.0.0.1:8080` 的 HTTP 上报**保留不动**，只新增 `astrbot` WS 客户端。
 - **AstrBot 数据目录**：`D:\qqbot\data`（由 AstrBot 的 `ASTRBOT_ROOT` 默认=当前工作目录决定），整个目录已被 gitignore，迁 VPS 时整体迁移。
 - **Windows 本地**：`uv tool install astrbot`（全局工具，`C:\Users\Administrator\AppData\Roaming\uv\tools\astrbot`）。
-- **VPS 目标**：Docker Compose 同时跑 AstrBot + NapCat（sidecar），挂载 `./data` 持久化。
+- **VPS 目标（D-011）**：原生 systemd，不使用 Docker —— `qqbot-napcat`（NapCat AppImage + Xvfb）与
+  `qqbot-astrbot`（uv 安装）两个服务，各自 `MemoryMax` 限内存；WebUI 只绑 `127.0.0.1`。
+  Docker Compose 仅保留为可选 fallback（`deploy/linux/docker-compose.yml`）。
 
 ## 3. 当前已实现（已实际验证）
 
@@ -44,12 +46,13 @@ QQ 小号 ⇄ NapCat 4.18.28（NTQQ 协议端，OneBot v11）
 - [x] 双 provider 已加载：DeepSeek（默认）+ 自定义聚合端点 5 个模型；WebChat 冒烟测试三种模型均正常回复（`scripts/smoke_llm.py`）
 - [x] 小号 `<BOT_QQ>` 重新扫码登录成功，AstrBot WS 适配器已连接
 - [x] 私聊/群聊测试链路已具备：QQ 消息 → NapCat → AstrBot（人设 example + 多模型）
+- [x] VPS 部署方案改为**原生 systemd（不使用 Docker）**：`deploy/linux/native/`（README + 两个 systemd 单元），迁移清单同步更新；Docker Compose 降级为可选 fallback（D-011）
 
 ## 4. 进行中 / 待验证
 
 - [x] **QQ 私聊实测通过**（2026-10-24 17:10）：主号发「在吗」→ example 回「在呢，周六了还找我啥事」
 - [ ] 群聊实测：用户确认现有群 `<GROUP_ID>` 不作为测试群；**暂缓**，待有合适的测试群再验收 @ 回复/上下文/主动插话
-- [ ] VPS Docker 化部署（资产已就绪，等 VPS 访问方式与迁移窗口）
+- [ ] VPS 原生部署（**用户暂缓**，等 VPS 就绪）：按 `deploy/linux/native/README.md` + [migration-vps.md](docs/migration-vps.md) 执行
 
 ## 5. 关键路径与端口
 
@@ -91,10 +94,10 @@ QQ 小号 ⇄ NapCat 4.18.28（NTQQ 协议端，OneBot v11）
 
 ## 8. 下一步计划
 
-1. **VPS 部署**（当前唯一阻塞项）：用户提供 VPS 访问方式后，按 [migration-vps.md](docs/migration-vps.md) 迁移，
-   用 [deploy/linux/README.md](deploy/linux/README.md) 验收，观察 24h。
+1. **VPS 原生部署**（用户暂缓，等 VPS 就绪）：按 [deploy/linux/native/README.md](deploy/linux/native/README.md)
+   与 [migration-vps.md](docs/migration-vps.md) 执行；海外 VPS 注意 QQ 风控与内存上限（D-011）。
 2. 群聊验收：等有合适的测试群后，把群号填入 `active_reply.whitelist`，按 [group-chat-tuning.md](docs/group-chat-tuning.md) 调参。
-3. 安全收尾：WebUI 初始密码改为强密码；核发的 LLM key 使用一段时间后轮换；VPS 上确认 WebUI 只经 SSH 隧道访问。
+3. 安全收尾：WebUI 初始密码改为强密码；LLM key 使用一段时间后轮换；VPS 上确认 WebUI 只经 SSH 隧道访问。
 4. 可选增强（按需）：表情包/戳一戳插件、主动插话升级（smart_wake 类）。
 
 ## 9. 变更记录
@@ -123,3 +126,11 @@ QQ 小号 ⇄ NapCat 4.18.28（NTQQ 协议端，OneBot v11）
 - 新增 `scripts/smoke_llm.py`，WebChat 全链路实测 deepseek/gemini/claude 均正常；
 - 管理员 ID 增加 QQ 主号 `<ADMIN_QQ>`（`/provider`、`/model`、`/reset`）；
 - **QQ 私聊实测通过**（「在吗」→「在呢，周六了还找我啥事」）；群聊测试经用户确认暂缓。
+
+### A-5（2026-10-24）VPS 部署方案改为原生 systemd（弃用 Docker）
+
+- 用户约束：VPS 内存/磁盘紧张、要跑编译 → Docker 方案否决（D-011，D-005/D-007 标注被取代）；
+- 新增 `deploy/linux/native/`：原生部署 README（AstrBot uv + NapCat AppImage + Xvfb）、
+  `qqbot-astrbot.service`、`qqbot-napcat.service`（含 MemoryMax/CPU/IO 限制）；
+- `docker-compose.yml` 移至 `deploy/linux/` 并标注为可选 fallback；删除 Docker 版 install.sh；
+- 重写 `docs/migration-vps.md` 为原生迁移清单（含海外 VPS 风控与 swap/内存建议）。

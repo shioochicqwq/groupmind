@@ -1,0 +1,33 @@
+[Unit]
+Description=AstrBot (QQ AI bot) — OneBot v11
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=qqbot
+Group=qqbot
+WorkingDirectory=/opt/qqbot
+EnvironmentFile=/opt/qqbot/.env
+Environment=PYTHONIOENCODING=utf-8
+Environment=TZ=Asia/Shanghai
+ExecStart=/home/qqbot/.local/bin/astrbot run
+Restart=always
+RestartSec=5
+
+# Resource guards: VPS is also used for builds, so keep the bot bounded.
+MemoryAccounting=yes
+MemoryMax=600M
+CPUWeight=50
+IOWeight=50
+Nice=10
+
+# Hardening (AstrBot only needs its own data dir + outbound network)
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=full
+ProtectHome=read-only
+ReadWritePaths=/opt/qqbot/data
+
+[Install]
+WantedBy=multi-user.target

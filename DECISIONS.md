@@ -63,6 +63,9 @@
 
 ## D-005 部署：Windows 本地验证 → Linux VPS Docker Compose
 
+> **已更新（2026-10-24）**：用户明确 VPS 内存/磁盘紧张且要跑编译，Docker 方案被否决；
+> VPS 部署改为**原生 systemd**，见 D-011。Docker Compose 仅保留为可选 fallback。
+
 - **日期**：2026-10-24
 - **背景**：本机为 Windows 且不能常驻；长期服务需放 VPS。
 - **决策**：本机用 `uv tool install astrbot` + 既有 NapCat.Shell 验证；VPS 用 Docker Compose（AstrBot + NapCat sidecar，`./data` 挂载）。仓库内 `deploy/windows/` 与 `deploy/linux/` 分离部署资产。
@@ -80,6 +83,9 @@
 - **验证**：`git status` 不含 `data/` 与 `.env`。
 
 ## D-007 VPS 部署拓扑：仓库根 Compose、镜像锁定、WebUI 只绑本机
+
+> **已更新（2026-10-24）**：Docker 方案被否决（内存/磁盘/编译需求），当前部署方式为
+> 原生 systemd（D-011）。本条的 Compose 细节仅作为可选 fallback 保留。
 
 - **日期**：2026-10-24
 - **背景**：本机不能常驻，最终要跑在 Linux VPS；需要可重复、可回滚的部署方式。
@@ -140,3 +146,33 @@
 - **放弃**：只接一个模型（不满足需求）；key 写进 `cmd_config.json`（配置易被备份/提交泄漏）。
 - **风险**：第三方聚合端点的稳定性与隐私（请求经第三方转发），敏感对话不应走该端点；密钥曾出现在对话和 QQ 消息中，**建议使用一段时间后轮换**。
 - **验证**：AstrBot 启动日志成功加载 6 个 provider 并选中 deepseek 为默认；`smoke_llm.py` 实测 `deepseek`、`gemini-3.8-flash`、`claude-sonnet-4-6` 均返回人设化回复（无报错）。
+
+## D-011 VPS 改为原生 systemd 部署（不使用 Docker）
+
+- **日期**：2026-10-24
+- **背景**：原计划（D-005/D-007）用 Docker Compose 部署到 Linux VPS。用户明确：
+  - VPS **内存/磁盘紧张**，且**有时要在上面跑编译**，Docker 守护进程 + 镜像（AstrBot ~1 GB、NapCat ~1 GB）占用不可接受；
+  - VPS 在**海外**（QQ 协议端登录风控风险更高）。
+- **调查**：
+  - AstrBot 官方提供 uv 安装 + systemd 用户服务方式，适合裸机部署；
+  - NapCat Linux 有两条原生路径：`napcat-linux-installer`（在已装 QQ Linux 上非侵入安装）
+    与 **NapCatAppImageBuild**（QQ + NapCat 打包成 AppImage，需 `xvfb-run`/`xauth`，可用
+    `--appimage-extract-and-run` 免 FUSE）；当前版本 `v4.18.41`（内含 QQ build 53644，约 300 MB）；
+  - Lagrange V2 已不再支持 OneBot 11、V1 实现不再维护，不能作为更轻量的替代；
+  - Docker 方案保留为可选 fallback（`deploy/linux/docker-compose.yml`）。
+- **决策**：
+  - AstrBot：`uv tool install astrbot --python 3.12`，systemd 系统服务 `qqbot-astrbot`，
+    `MemoryMax=600M`、`Nice=10`、`CPUWeight/IOWeight=50`；
+  - NapCat：AppImage + `xvfb-run`，systemd 服务 `qqbot-napcat`，`MemoryMax=1100M`；
+  - 两个服务均 `Restart=always`，WebUI 仅监听 `127.0.0.1`，只经 SSH 隧道访问；
+  - 迁移仍整体搬运 `data/`；VPS 上重新扫码登录（海外 IP 可能触发手机验证）。
+- **理由**：无 Docker 守护进程/镜像开销；systemd 自带重启、日志（journald）与内存上限；
+  资源紧张时可 `systemctl stop` 两个服务让编译任务独占内存。
+- **放弃**：Docker Compose（资源开销）；Lagrange（OneBot 11 已停维护）；继续 Windows 常驻（本机不能常驻）。
+- **风险 / 待验证**：
+  - 内存估算 AstrBot 250–450 MB + NapCat 500–900 MB，**未在目标 VPS 实测**，需按实测调 `MemoryMax` 并配 swap；
+  - AppImage 的配置目录路径（推测 `/opt/napcat/config`）与快登/扫码流程需在 VPS 上实测确认；
+  - 海外 IP 的 QQ 风控是方案级风险，无法完全消除。
+- **验证**：`deploy/linux/native/` 下的 README 与 systemd 单元为待执行清单；
+  在 VPS 上完成扫码 + `journalctl` 出现「适配器已连接」后回填实测数据。
+- **代码位置**：`deploy/linux/native/`、`docs/migration-vps.md`、`deploy/linux/README.md`。
