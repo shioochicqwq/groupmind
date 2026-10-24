@@ -104,6 +104,9 @@ QQ 小号 ⇄ NapCat 4.18.28（NTQQ 协议端，OneBot v11）
   「小明啊，喜欢打游戏，刚说完就考我」，✅ 记忆生效。
 - 新增 provider：WebUI「模型提供商」添加 source + 模型，key 用 `$VAR` 环境变量。
 
+**上下文与记忆**：会话隔离（umo）、群聊 ICL（200 条）+ 历史工具、图片描述、自动压缩策略；
+详见 [docs/context-and-memory.md](docs/context-and-memory.md)。
+
 ## 7. 已知问题与技术债
 
 - 本地 NapCat 升级到 4.18.41 后，快速登录（`-q <uin>`）要求手机 QQ 验证，需改回扫码；换机/换版本后扫码是常规路径。
