@@ -1,56 +1,60 @@
 # 上下文与记忆机制
 
-> 目标：让 bot 在私聊/群聊里「记得住上文、接得上梗」，同时不无限膨胀、不串会话。
-> 对应配置由 `scripts/bootstrap_astrbot_config.py` 写入 `data/cmd_config.json`。
+> 目标：让 bot 在私聊/群聊里「记得住人、接得上梗」，同时控制 token。
+> 实现：AstrBot 会话历史 + 群聊 ICL + **memory_beyond 插件**（事实记忆 + 压缩）。
+> 决策：`DECISIONS.md` D-013 / D-016；插件版本见 [external-plugins.md](external-plugins.md)。
 
-## 1. 会话隔离
+## 1. 三层结构
 
-- AstrBot 以 `umo`（unified message origin）区分会话：`平台:消息类型:会话 ID`，
-  例如私聊 `napcat:FriendMessage:<ADMIN_QQ>`，群聊 `napcat:GroupMessage:<群号>`。
-- 私聊/各群各自独立上下文；`platform_settings.unique_session=false`（群内多人共享同一群上下文，符合群聊直觉）。
-- 管理员可用 `/reset` 清空当前会话上下文（QQ 主号已在 `admins_id`）。
+| 层 | 机制 | 当前配置 |
+|---|---|---|
+| 短期对话 | AstrBot 按 `umo` 保存会话历史；群聊额外 ICL 注入 | ICL **100** 条；历史持久化 200 条 |
+| 长期记忆 | memory_beyond 的 Markdown 事实文件 + 索引 + 按需召回 | people 开 / global 关 / recall≤3 |
+| 压缩 | memory_beyond 滚动摘要（0.70 触发），摘要用便宜模型 | gemini-3.8-flash，摘要≤1500 字 |
 
-## 2. 群聊上下文（接梗关键）
+会话隔离：私聊 `napcat:FriendMessage:<QQ>`、群聊 `napcat:GroupMessage:<群号>`，互不串；`/reset` 清当前会话。
 
-| 机制 | 配置 | 当前值 | 作用 |
-|---|---|---|---|
-| ICL 注入 | `provider_ltm_settings.group_icl_enable` | `true` | 把「上次回复后」的群消息拼进本次 LLM 请求 |
-| ICL 条数 | `group_message_max_cnt` | `200` | 注入上限 |
-| 历史持久化 | `group_message_history_enable` | `true` | 存最近群消息，供工具检索 |
-| 历史条数 | `group_message_history_max_cnt` | `200` | |
-| 图片描述 | `image_caption` + `image_caption_provider_id` | `true` / `gemini-3.8-flash` | 群里图片转一句中文描述再进上下文 |
+## 2. 记忆本子（memory_beyond）
 
-另有工具 `get_group_message_history`（默认激活）：当用户提到「之前说过的」而自动上下文不够时，
-模型可主动检索当前群的历史消息。
+- **数据**：`data/plugin_data/astrbot_plugin_memory_beyond/memories/` 下 session / people / global 的 Markdown；
+  一个文件一条事实，webUI「插件页面 → 记忆管理」可查看/编辑/整理/删除。
+- **工具**：模型用 `memory_write/read/edit/search` 自己读写；`/mb_status` 看状态与 token 构成；
+  `/mb_reset` 清本会话压缩状态；`/mb_probe` 测摘要链路。
+- **作用域**：
+  - session：本群/本私聊的人和事（默认）；
+  - people：同一个人跨群/私聊（按 QQ 号锚定，**开启**，注意隐私）；
+  - global：bot 自身的全局规则（**关闭**，避免任何群污染全局）。
+- **写入策略**（已写入人设）：稳定事实才记；一次性状态、秘密、key 不记；不向群友宣告；不编。
+- **与 Chatbox 对比**：Chatbox 是「≤1000 字/条、总量≤8000 字的事实列表 + 冻结快照」；
+  memory_beyond 用文件+索引+按需召回+压缩，长会话更省 token，且多 people/global 作用域（详见
+  [corpus-and-style.md](corpus-and-style.md) 第 1 节）。
 
-## 3. 私聊上下文
+## 3. Token 实测（2026-10-24）
 
-- 常规多轮对话：AstrBot 按会话保存历史并随请求带上（受模型上下文窗口约束）。
-- 已实测：同一会话「记住：我叫小明，喜欢打游戏」→「我叫什么？喜欢干嘛？」→ 正确回答。
-- `/reset` 可清空。
+`/mb_status` 单轮估算 ≈ **7.8k tokens**（deepseek，首次会话）：
 
-## 4. 上下文压缩（防爆窗口）
+| 组成 | 约 |
+|---|---|
+| 固定开销（system prompt/人设/skills 列表等） | 3.7k |
+| 工具声明（文件/执行/搜索/记忆等 schema） | 4.1k |
+| 记忆索引/摘要/召回 | 0–0.3k |
+| 历史原文 | 少 |
 
-`agent_runner.config.compression` 当前为默认策略：
+- 缓存命中约 7k tokens（DeepSeek prompt cache），实际成本显著低于全价；
+- 省 token 手段：ICL 100、memory 压缩/摘要、recall≤3、摘要模型用 gemini-flash；
+- 试过 `tool_schema_mode=skills_like`：工具声明 4110 vs 4066，无收益，已回退 full；
+- 后续可选：自定义只读文件工具替代 `computer_use_runtime=local`（可去掉 file/shell schema，省约 2–3k）。
 
-```json
-{
-  "max_turns": -1,
-  "trim_turns": 1,
-  "overflow_strategy": "llm_compress",
-  "keep_recent_ratio": 0.15,
-  "provider_id": "",
-  "fallback_max_tokens": 128000
-}
-```
+## 4. 群聊上下文
 
-- 达到模型上下文上限时用 LLM 摘要压缩历史（`llm_compress`），保留最近 15% 原文；
-- `provider_id` 为空 = 用默认 provider；如需更便宜可改成 `gemini-3.8-flash`；
-- 不同模型窗口不同（deepseek-chat 128K，gemini/claude/gpt 聚合模型 1M 左右），压缩策略按窗口自适应。
+- ICL：每轮注入最近 100 条群消息（`group_message_max_cnt`），⚠️[DIRECTED AT YOU] 标注 @；
+- `get_group_message_history` 工具：需要更早消息时模型主动检索（200 条持久化）；
+- 图片：`gemini-3.8-flash` 生成一句中文描述后进上下文；
+- 主动插话仍关闭（等测试群）。
 
-## 5. 已知边界
+## 5. 边界与注意
 
-- 群聊 ICL 的 token 成本随活跃度上升（200 条 × 每群）；群多时可降到 100。
-- 私聊/群聊记忆只在本地 `data/data_v4.db`；迁移 VPS 时随 `data/` 一起搬。
-- 没有跨会话的长期记忆（如「记住我是谁」全局生效）——如果需要，可后续用知识库或 `future_task`/cron 方案。
-- 主动插话仍关闭（等测试群），因此「群聊上下文」目前只在被 @ 时参与。
+- people 记忆跨群可见，隐私敏感时关 `enable_people_memory`；
+- 压缩后机器人侧历史由摘要接棒，平台侧聊天记录不受影响；
+- 迁移 VPS：`data/plugin_data/...` 随 `data/` 一起搬；插件版本/提交见 external-plugins；
+- 人设/模型切换会影响记忆注入的固定开销，换 1M 模型时可调大 `max_context_tokens`。

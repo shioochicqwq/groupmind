@@ -13,16 +13,20 @@
 ## 2. 架构
 
 ```
-QQ 小号 ⇄ NapCat 4.18.28（NTQQ 协议端，OneBot v11）
+QQ 小号 ⇄ NapCat 4.18.41（NTQQ 协议端，OneBot v11）
         ⇄ 反向 WebSocket ws://127.0.0.1:6199/ws
         ⇄ AstrBot 4.29.1（消息分发 / 人格 / 上下文 / 插件 / LLM 编排）
-        ⇄ LLM Provider（DeepSeek 或任意 OpenAI 兼容服务）
+        ├─ memory_beyond：事实记忆本子 + 上下文压缩（Markdown，data/plugin_data）
+        ├─ Skill：data/skills/<name>/SKILL.md（模型用文件工具按需读取）
+        └─ LLM Provider（DeepSeek 默认 + 聚合端点 5 模型）
 ```
 
 - **AstrBot** 作为反向 WS 服务端（`ws_reverse_port: 6199`）；NapCat 作为 WS 客户端连入。
 - **NapCat** 复用本机既有安装 `D:\Apps\NapCat`（原先用于 QQ 群图片抓取脚本），其 HTTP 服务 3000 端口和到 `127.0.0.1:8080` 的 HTTP 上报**保留不动**，只新增 `astrbot` WS 客户端。
 - **AstrBot 数据目录**：`D:\qqbot\data`（由 AstrBot 的 `ASTRBOT_ROOT` 默认=当前工作目录决定），整个目录已被 gitignore，迁 VPS 时整体迁移。
 - **Windows 本地**：`uv tool install astrbot`（全局工具，`C:\Users\Administrator\AppData\Roaming\uv\tools\astrbot`）。
+- **记忆**：memory_beyond（固定提交，MIT），人物记忆跨会话、全局记忆先关；压缩由插件接管（D-013）。
+- **文件工具**：`computer_use_runtime=local` + workspace 权限、禁执行（D-014），可读 QQ 发来的附件（落 `data/temp`）与技能文件，读不到 host。
 - **VPS 目标（D-011）**：原生 systemd，不使用 Docker —— `qqbot-napcat`（NapCat AppImage + Xvfb）与
   `qqbot-astrbot`（uv 安装）两个服务，各自 `MemoryMax` 限内存；WebUI 只绑 `127.0.0.1`。
   Docker Compose 仅保留为可选 fallback（`deploy/linux/docker-compose.yml`）。
@@ -52,10 +56,15 @@ QQ 小号 ⇄ NapCat 4.18.28（NTQQ 协议端，OneBot v11）
 - [x] **多模态**：图片 caption 用 `gemini-3.8-flash`（视觉模型），群聊上下文图片会转中文描述；聚合端点视觉输入已直连验证
 - [x] **Skill 体系**：仓库 `skills/` 源 + `scripts/install_skill.py` 安装；示例技能 `web-lookup` 已安装并生效；开发指南 [docs/skills-dev.md](docs/skills-dev.md)
 - [x] **插件层**：仓库 `plugins/` + `scripts/install_plugin.py`；`astrbot_plugin_strip_refs` 移除 QQ 里难看的 `<ref>` 引用标记（非流式路径已验证）
+- [x] **记忆本子（A-11）**：memory_beyond v1.3.7（固定提交 `0ec75bf…`）已安装；私聊写事实 → `/reset` → 追问能回忆；`/mb_status` 正常；人物记忆开、全局记忆关
+- [x] **文件工具（A-12）**：`computer_use_runtime=local` + workspace/禁执行；WebChat 实测读取 `data/temp` 文件成功，读 `D:\qqbot\PROJECT.md` 被拒；Skill 因此能真正读取 `SKILL.md`
+- [x] **Token 策略（A-13）**：ICL 200→100；memory_beyond 0.70 压缩 + gemini-flash 摘要；`context_report.py` 基线；实测单轮固定开销 ~7.8k（固定 ~3.7k + 工具声明 ~4.1k，缓存命中 ~7k）；`skills_like` 无收益已回退
+- [x] **Skill 教学/人味（A-13）**：[skill-tutorial.md](docs/skill-tutorial.md)、[corpus-and-style.md](docs/corpus-and-style.md)、`skills/style-humanizer` 已安装
 
 ## 4. 进行中 / 待验证
 
 - [x] **QQ 私聊实测通过**（2026-10-24 17:10）：主号发「在吗」→ example 回「在呢，周六了还找我啥事」
+- [ ] **QQ 文件附件实测**：你在 QQ 私聊/群聊发 `.txt`/`.pdf`/`.docx`，验证「总结这个文件」可用（机制已用 `data/temp` 文件验证）
 - [ ] 群聊实测：用户确认现有群 `<GROUP_ID>` 不作为测试群；**暂缓**，待有合适的测试群再验收 @ 回复/上下文/主动插话
 - [ ] VPS 原生部署（**用户暂缓**，等 VPS 就绪）：按 `deploy/linux/native/README.md` + [migration-vps.md](docs/migration-vps.md) 执行
 
@@ -72,6 +81,10 @@ QQ 小号 ⇄ NapCat 4.18.28（NTQQ 协议端，OneBot v11）
 | NapCat OneBot 配置 | `D:\Apps\NapCat\config\onebot11_<QQ号>.json` |
 | 旧抓图脚本接口 | NapCat HTTP server `:3000`，HTTP 上报 `http://127.0.0.1:8080/qq_event`（保留） |
 | 小号已加入群 | `<GROUP_ID>`「<GROUP_NAME>」（54 人，**不作为测试群**） |
+| 记忆数据 | `data/plugin_data/astrbot_plugin_memory_beyond/memories/`（session/people/global） |
+| 记忆插件配置 | `data/config/astrbot_plugin_memory_beyond_config.json` |
+| 文件工具 | `computer_use_runtime=local`，workspace 权限、禁执行；附件落在 `data/temp` |
+| 外部插件清单 | [docs/external-plugins.md](docs/external-plugins.md) |
 | LLM Key | 本地 `.env` 的 `DEEPSEEK_API_KEY` / `MULTI_API_KEY`（gitignored） |
 
 ## 6. 模型切换能力
@@ -104,8 +117,9 @@ QQ 小号 ⇄ NapCat 4.18.28（NTQQ 协议端，OneBot v11）
   「小明啊，喜欢打游戏，刚说完就考我」，✅ 记忆生效。
 - 新增 provider：WebUI「模型提供商」添加 source + 模型，key 用 `$VAR` 环境变量。
 
-**上下文与记忆**：会话隔离（umo）、群聊 ICL（200 条）+ 历史工具、图片描述、自动压缩策略；
-详见 [docs/context-and-memory.md](docs/context-and-memory.md)。
+**上下文与记忆**：会话隔离（umo）、memory_beyond 事实记忆（people/session，全局暂关）、群聊 ICL **100** 条 +
+历史工具、图片描述、插件接管压缩；详见 [docs/context-and-memory.md](docs/context-and-memory.md)。
+Token 策略与实测见 D-016；外部插件版本见 [docs/external-plugins.md](docs/external-plugins.md)。
 
 ## 7. 已知问题与技术债
 
@@ -116,27 +130,30 @@ QQ 小号 ⇄ NapCat 4.18.28（NTQQ 协议端，OneBot v11）
 - NapCat / QQ 必须以 NapCat 目录为工作目录启动，否则会在仓库根写出 `guild*.db`（启动脚本已 `Set-Location` 修正，gitignore 兜底）。
 - 主动插话依赖会话已存在（先 @ 一次产生对话），否则日志报 `No active conversation`。
 - **主动插话当前关闭**（`active_reply.enable=false`）：小号所在群不是测试群，避免误插话；有测试群后再开并填白名单。
-- 图片理解未开：群里有图只会显示 `[Image]`，可后续用视觉模型做 image caption。
 - 尚未做刷屏/被举报的线上观察，限流与主动插话概率需要实群调参。
 - **内存容量风险（2026-10-24 实测）**：AstrBot RSS ≈ 264 MB，QQ 相关进程合计 ≈ 1.8 GB（Electron 多进程），
   NapCat 方案在 2 GB VPS 上会很紧；建议 ≥4 GB 或改官方 QQ 机器人（能力受限），见 D-011。
 - **搜索 key 特殊处理（临时）**：AstrBot 的 `websearch_deepseek_key` 不支持 `$ENV` 引用，bootstrap 会把
   `DEEPSEEK_API_KEY` 的实际值写进 gitignored 的 `data/cmd_config.json`（provider key 仍是 `$ENV` 引用）。
 - 引用标记 `<ref>`：联网搜索会自动要求模型输出 `<ref>`，已通过插件在发送前剥离（WebChat 流式模式仍会显示，QQ 非流式路径已清理）。
+- **单轮固定开销偏高（实测 ~7.8k tokens）**：固定开销 ~3.7k + 工具声明 ~4.1k（本地文件/执行工具 schema 较大）；
+  DeepSeek 有 prompt cache 命中（/mb_status 显示 ~7k 缓存），实际成本低于全价。后续可考虑自定义只读文件工具替代 local runtime。
+- **memory_beyond 较新**（4 stars，v1.3.7）：接管压缩/身份标注，升级前必须备份并看 CHANGELOG；人物记忆跨群可见（隐私）。
 - 图片 caption 会额外消耗视觉模型 token；主动插话仍关闭，等测试群。
 
 ## 8. 下一步计划
 
 1. **本地调优优先（用户决定：VPS 暂缓，调好再说）**：
-   - 按用户方向迭代「上下文管理 / 多模态 / 联网搜索」相关体验；
-   - 支持用户自写 Skill：`skills/` + [docs/skills-dev.md](docs/skills-dev.md) + `install_skill.py`；
-   - 人设/群聊行为继续用 [persona-eval.md](docs/persona-eval.md) 评测。
-2. 群聊验收：等有合适的测试群后，把群号填入 `active_reply.whitelist` 并开启 `active_reply.enable`，
+   - 记忆/文件/搜索已就绪；继续按用户方向迭代上下文与省 token（D-016）；
+   - 支持用户自写 Skill：[skill-tutorial.md](docs/skill-tutorial.md) + [skills-dev.md](docs/skills-dev.md) + `install_skill.py`；
+   - 人味：按 [corpus-and-style.md](docs/corpus-and-style.md) 建评测集 + few-shot，再迭代 [persona-eval.md](docs/persona-eval.md)。
+2. **QQ 文件附件实测**：用户发 `.txt/.pdf/.docx` 验证「总结这个文件」（机制已在 WebChat 用 `data/temp` 文件验证）。
+3. 群聊验收：等有合适的测试群后，把群号填入 `active_reply.whitelist` 并开启 `active_reply.enable`，
    按 [group-chat-tuning.md](docs/group-chat-tuning.md) 调参。
-3. VPS 部署（暂缓）：按 [deploy/linux/native/README.md](deploy/linux/native/README.md) 与
+4. VPS 部署（暂缓）：按 [deploy/linux/native/README.md](deploy/linux/native/README.md) 与
    [migration-vps.md](docs/migration-vps.md) 执行；海外 VPS 注意 QQ 风控与内存上限（D-011）。
-4. 安全收尾：WebUI 初始密码改为强密码；LLM key 使用一段时间后轮换。
-5. 可选增强（按需）：表情包/戳一戳插件、技能市场调研、主动插话升级（smart_wake 类）。
+5. 安全收尾：WebUI 初始密码改为强密码；LLM key 使用一段时间后轮换。
+6. 可选增强（按需）：表情包/戳一戳插件、self_learning（AGPL，D-015）、减少工具声明的自定义文件插件。
 
 ## 9. 变更记录
 
@@ -211,3 +228,25 @@ QQ 小号 ⇄ NapCat 4.18.28（NTQQ 协议端，OneBot v11）
 - 插件：新增 `plugins/astrbot_plugin_strip_refs` + `scripts/install_plugin.py`，剥离 QQ 回复里的 `<ref></ref>`（非流式路径验证）；
 - `smoke_llm.py` 增加 `--no-stream`（更接近 QQ 非流式路径，用于验证装饰/发送阶段行为）；
 - 已知临时 workaround：websearch key 不支持 `$ENV`，实际值落在 gitignored 的 cmd_config.json。
+
+### A-11（2026-10-24）记忆本子 memory_beyond
+
+- 安装 memory_beyond v1.3.7（固定提交 `0ec75bf…`，MIT，无第三方依赖），新增 4 个记忆工具；
+- 配置：人物记忆开、全局记忆关、recall≤3、摘要 gemini-flash、整理 claude-sonnet、压缩 0.70；
+- 关闭 AstrBot 内置压缩（fallback=1e9、max_turns=-1）与 identifier，交由插件接管；
+- 人设增加记忆使用规范（何时记/不记、不宣告、不编）；
+- 验证：私聊写事实 → `/reset` → 追问能回忆；`/mb_status` 显示记忆/压缩状态；记忆文件在 data/plugin_data。
+
+### A-12（2026-10-24）文件工具（只读 workspace）
+
+- `computer_use_runtime=local`，member/admin 均 `filesystem_scope=workspace`、禁执行/禁网络；
+- 修复隐藏问题：此前 Skill 正文读不到，技能不生效；现在模型可读 `data/skills` 与 QQ 附件（data/temp）；
+- 验证：读 `data/temp/qqbot-test-file.txt` 成功；读 `D:\qqbot\PROJECT.md` 被权限拒绝；工具列表含 file_read。
+
+### A-13（2026-10-24）省 token、Skill 教程与语料方案
+
+- ICL 200→100；新增 `scripts/context_report.py`；`/mb_status` 实测固定开销 ~7.8k（缓存命中 ~7k）；
+- `tool_schema_mode=skills_like` 无收益（4110 vs 4066 tokens）已回退 full；
+- 新增 [skill-tutorial.md](docs/skill-tutorial.md)、[corpus-and-style.md](docs/corpus-and-style.md)、
+  [external-plugins.md](docs/external-plugins.md)、`skills/style-humanizer`；
+- 健康检查扩展：记忆插件/文件工具/记忆工具/记忆目录/上下文配置/runtime 检查，全 PASS。

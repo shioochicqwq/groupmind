@@ -54,8 +54,9 @@ AstrBot 已经注册但**按配置激活**的工具（详见 WebUI → 工具 �
 | 知识库 | `astr_kb_search` | 需建知识库 |
 | 浏览器/沙盒执行 | `astrbot_execute_shell` 等 | `computer_use_runtime=sandbox` 且 sandbox booter 可用（本地未开） |
 
-> 本地/当前 VPS 配置下 `computer_use_runtime=none`，**依赖 shell/浏览器/sandbox 的技能不可用**；
-> Skill 应优先调用上表中的内置 function tool。写技能时别假设有 `curl`、Python 脚本执行权限。
+> 本地/当前 VPS 配置下 `computer_use_runtime=local`（只开放 workspace、禁执行），
+> 模型可读 `data/skills` 与 `data/temp`（QQ 附件），但**不能 shell/浏览器/写 host**；
+> Skill 应优先调用上表中的内置 function tool。教程见 [skill-tutorial.md](skill-tutorial.md)。
 
 ## 4. 调试与验收
 

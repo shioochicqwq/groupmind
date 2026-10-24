@@ -143,6 +143,19 @@ def main() -> None:
     pset["default_image_caption_provider_id"] = "gemini-3.8-flash"
     pset["image_caption_prompt"] = "用中文简短描述这张图片的关键内容（一句话）。"
 
+    # --- 工具：本机 runtime 只开放 workspace 读写（读 QQ 附件/技能），禁执行 ---
+    pset["computer_use_runtime"] = "local"
+    pset["computer_use_require_admin"] = True
+    workspace_policy = {
+        "allow_execution": False,
+        "allow_network": False,
+        "filesystem_scope": "workspace",
+    }
+    pset["computer_use_local_permissions"] = {
+        "member": dict(workspace_policy),
+        "admin": dict(workspace_policy),
+    }
+
     # --- 管理员：Dashboard 用户名 + QQ 主号（/provider、/model 等管理员指令需要） ---
     admins = cfg.setdefault("admins_id", ["astrbot"])
     for admin in ("astrbot", "<ADMIN_QQ>"):
@@ -154,7 +167,9 @@ def main() -> None:
     ltm["group_message_history_enable"] = True
     ltm["group_message_history_max_cnt"] = 200
     ltm["group_icl_enable"] = True
-    ltm["group_message_max_cnt"] = 200
+    # 200 -> 100：ICL 是每轮固定 token 开销，降低后靠 memory_beyond 摘要 +
+    # get_group_message_history 工具补历史（D-016 token 策略）。
+    ltm["group_message_max_cnt"] = 100
     # 群聊上下文里的图片用视觉模型做描述（需要 image_caption_provider_id）
     ltm["image_caption"] = True
     ltm["image_caption_provider_id"] = "gemini-3.8-flash"
@@ -186,6 +201,25 @@ def main() -> None:
     cfg.setdefault("agent_runner", {}).setdefault("config", {}).setdefault(
         "persona", {}
     )["persona_id"] = "example"
+
+    # --- 上下文压缩交给 memory_beyond 插件接管（D-013） ---
+    # 内置压缩没有关闭开关：把 token 路径的兜底窗口调到极大，轮数路径保持 -1，
+    # 让内置压缩永不触发；实际压缩由 memory_beyond 在 0.70 阈值执行。
+    compression = (
+        cfg.setdefault("agent_runner", {})
+        .setdefault("config", {})
+        .setdefault("compression", {})
+    )
+    compression["fallback_max_tokens"] = 1_000_000_000
+    compression["max_turns"] = -1
+
+    # --- 工具声明省 token：先给轻量 schema，模型选定工具后再补参数 schema ---
+    # 实测（2026-10-24）：skills_like 未降低工具声明（4110 vs 4066 tokens），
+    # 反而多一次二阶段调用；恢复 full，token 优化靠压缩/ICL 裁剪（D-016）。
+    misc = cfg.setdefault("agent_runner", {}).setdefault("config", {}).setdefault(
+        "misc", {}
+    )
+    misc["tool_schema_mode"] = "full"
 
     CFG_PATH.write_text(
         json.dumps(cfg, ensure_ascii=False, indent=2) + "\n", encoding="utf-8-sig"

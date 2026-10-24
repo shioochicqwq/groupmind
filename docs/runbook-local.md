@@ -118,6 +118,36 @@ python scripts\smoke_llm.py --provider deepseek --no-stream --message "帮我查
 - 多模态：图片 caption 用 `gemini-3.8-flash`，群聊图片会转一句中文描述（消耗视觉 token）。
 - 引用标记 `<ref>` 由插件 `astrbot_plugin_strip_refs` 在发送前剥离（仅非流式；QQ 正常生效）。
 
+## 记忆本子（memory_beyond）
+
+- 插件版本/配置/升级：见 [external-plugins.md](external-plugins.md)；数据在
+  `data/plugin_data/astrbot_plugin_memory_beyond/`。
+- 私聊验证：
+
+  ```powershell
+  # 在 QQ 私聊里对 example 说：记住：我叫小明，喜欢打游戏
+  # 然后发 /reset 清会话，再问：我叫什么？喜欢干嘛？
+  # 管理员指令：
+  /mb_status    # 记忆/压缩状态、token 分项
+  /mb_probe     # 摘要链路自检
+  ```
+
+- WebUI 侧边栏「插件页面 → 记忆管理」可查看/编辑/整理记忆。
+- 只跑命令不测 QQ 时：`python scripts\smoke_llm.py --no-stream --message "..."` + `/mb_status`。
+
+## 文件工具（读你发给 bot 的文件）
+
+- 配置：`computer_use_runtime=local`，member/admin 均 workspace、禁执行/禁网络（D-014）。
+- 把你发的 `.txt/.pdf/.docx` 直接发给 example，附一句「总结这个文件」；AstrBot 会把
+  `[File Attachment: name, path]` 注入，模型用 `astrbot_file_read_tool` 读 `data/temp`。
+- 越权测试：让它读 `D:\qqbot\PROJECT.md`，应被权限拒绝（只允许 workspace/技能/临时目录）。
+- 手动验证（不依赖 QQ）：
+
+  ```powershell
+  Set-Content data\temp\test.txt "暗号是蓝色海豚 42" -Encoding UTF8
+  # WebChat 里发：读取 D:\qqbot\data\temp\test.txt，暗号是什么
+  ```
+
 ## 群聊测试
 
 - 小号加入测试群（建议自己建的小群）；

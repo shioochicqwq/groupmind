@@ -20,6 +20,10 @@ import socket
 import sys
 import urllib.error
 import urllib.request
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+MEMORY_DIR = ROOT / "data" / "plugin_data" / "astrbot_plugin_memory_beyond"
 
 PORTS = {
     "AstrBot WebUI": 6185,
@@ -115,6 +119,59 @@ def main() -> int:
             personas = http_json(f"{args.dashboard}/api/v1/personas", token=token)["data"]
             ids = [p.get("persona_id") for p in personas]
             record("人格", "example" in ids, f"{len(ids)} personas: {', '.join(str(i) for i in ids)}")
+
+            # Memory plugin (memory_beyond) + file/memory tools
+            try:
+                plugins = http_json(f"{args.dashboard}/api/v1/plugins", token=token)["data"]
+                if isinstance(plugins, dict):
+                    plugins = plugins.get("plugins") or []
+                names = [
+                    p.get("name") or p.get("root_dir_name") or ""
+                    for p in plugins
+                    if isinstance(p, dict)
+                ]
+                record(
+                    "记忆插件 memory_beyond",
+                    any("memory_beyond" in str(n) for n in names),
+                    f"{len(names)} plugins loaded",
+                )
+            except Exception as exc:  # noqa: BLE001
+                record("记忆插件 memory_beyond", False, f"{exc.__class__.__name__}: {exc}")
+
+            try:
+                tools = http_json(f"{args.dashboard}/api/v1/tools", token=token)["data"]
+                tool_names = {t.get("name") for t in tools}
+                record(
+                    "文件工具",
+                    "astrbot_file_read_tool" in tool_names,
+                    "astrbot_file_read_tool registered",
+                )
+                record(
+                    "记忆工具",
+                    "memory_write" in tool_names and "memory_search" in tool_names,
+                    "memory_write/memory_search registered",
+                )
+            except Exception as exc:  # noqa: BLE001
+                record("文件/记忆工具", False, f"{exc.__class__.__name__}: {exc}")
+
+            if MEMORY_DIR.is_dir():
+                count = len(list(MEMORY_DIR.rglob("*.md")))
+                record("记忆数据目录", True, f"{count} memory files")
+            else:
+                record("记忆数据目录", False, "missing data/plugin_data/astrbot_plugin_memory_beyond")
+
+            # Context/token config sanity
+            cfg_path = ROOT / "data" / "cmd_config.json"
+            cfg = json.loads(cfg_path.read_text(encoding="utf-8-sig"))
+            comp = cfg["agent_runner"]["config"]["compression"]
+            icl = cfg["provider_ltm_settings"]["group_message_max_cnt"]
+            runtime = cfg["provider_settings"].get("computer_use_runtime")
+            record(
+                "上下文配置",
+                int(comp.get("fallback_max_tokens", 0)) >= 1_000_000 and icl <= 100,
+                f"fallback={comp.get('fallback_max_tokens')}, ICL={icl}",
+            )
+            record("文件 runtime", runtime == "local", f"computer_use_runtime={runtime}")
         except urllib.error.HTTPError as exc:
             record("AstrBot Dashboard", False, f"HTTP {exc.code}")
         except Exception as exc:  # noqa: BLE001

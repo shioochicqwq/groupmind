@@ -218,3 +218,74 @@
   - 非流式 WebChat 回复中不再出现 `<ref>`（3 次查询验证）。
 - **代码位置**：`scripts/bootstrap_astrbot_config.py`、`skills/web-lookup/`、`plugins/astrbot_plugin_strip_refs/`、
   `scripts/install_skill.py`、`scripts/install_plugin.py`、`docs/skills-dev.md`。
+
+## D-013 记忆本子：memory_beyond（Chatbox 式事实记忆的加强版）
+
+- **日期**：2026-10-24
+- **背景**：用户希望「模型自己有一个本子，记住认识的人的关键信息」，同时上下文管理要省 token。
+- **调查**：
+  - Chatbox 1.23 Memory 的实现（源码 `agent-memory.ts` / `agent-persona.ts`）：事实条目
+    `{id, content, createdAt}`，单条 ≤1000 字符、注入总量 ≤8000 字符；模型用 `save_memory`/`delete_memory`
+    工具自写；Global vs Copilot 两种作用域；会话开始时冻结快照（利于 prompt cache）；设置页可审阅/删除；
+    不是 RAG。
+  - 候选插件：memory_beyond（MIT、无第三方依赖、AstrBot>=4.5.7、v1.3.7、数据为 Markdown 文件、
+    索引式注入 + 自带压缩 + people/global/session 作用域 + 管理页）、memory_companion（陪伴导向，重，许可待确认）、
+    self_learning（风格学习 AGPL，另作 D-015）。
+- **决策**：安装 memory_beyond 固定提交 `0ec75bf…`；人物记忆开（按 QQ 号锚定、跨会话），全局记忆先关；
+  recall 最多 3 条；摘要用 `gemini-3.8-flash`、整理用 `claude-sonnet-4-6`；压缩阈值 0.70，并关闭 AstrBot
+  内置压缩（`fallback_max_tokens=1e9`、`max_turns=-1`）与身份标注（`identifier=false`）。
+- **理由**：与 Chatbox 一样「事实级、模型自写、可审阅」，但用文件+索引+按需召回，长会话更省 token；
+  MIT 无依赖，风险可控；人和事的 markdown 文件可手工改、可迁移、可备份。
+- **放弃**：memory_companion（复杂/许可）；自研（重复造轮子）；只做全局记忆（易被群友污染）。
+- **风险**：插件较新（4 stars）、接管压缩可能配置冲突；人物记忆跨群可见带来隐私问题；记忆注入本身有 token 成本。
+- **验证**：见 A-11；私聊写事实 → `/reset` → 追问能回忆；`/mb_status` 正常；记忆文件在
+  `data/plugin_data/astrbot_plugin_memory_beyond/memories/`。
+
+## D-014 文件工具：本机 runtime 只开放 workspace（读 QQ 发来的文件）
+
+- **日期**：2026-10-24
+- **背景**：用户明确要的是「发给 bot 的文件它能读」，不是读本机任意路径。
+- **调查**：AstrBot 收到 File 消息会下载到 `data/temp`，并把
+  `[File Attachment: name ..., path ...]` 注入模型；`astrbot_file_read_tool` 仅在
+  `computer_use_runtime=local/sandbox` 时挂载，workspace 权限允许读 `data/temp`、`data/skills`、
+  会话工作区，支持 txt/图片/PDF/docx/epub（本地 markitdown）；`allow_execution=false` 时无需
+  bubblewrap 隔离。
+- **决策**：`computer_use_runtime=local`；member/admin 都 `filesystem_scope=workspace`、
+  `allow_execution=false`、`allow_network=false`。不开放 host、不执行 shell。
+- **理由**：只满足「读收到的文件/技能」需求，攻击面小；同时修复了一个隐藏问题——此前 Skill 只有
+  description 进 prompt、模型读不到 `SKILL.md`，技能实际不生效。
+- **放弃**：admin `filesystem_scope=host`（能读 data/ 下密钥，风险大）；自定义白名单只读插件（多写一层）。
+- **风险**：workspace 内仍可读技能/插件/临时文件；模型可能被诱导读取无关临时文件（权限仅限 workspace）。
+- **验证**：WebChat 实际读取 `data/temp/qqbot-test-file.txt` 成功；读取 `D:\qqbot\PROJECT.md` 被权限拒绝；
+  `astrbot_file_read_tool` 出现在工具列表。
+
+## D-015 Skill 教学与人味：先评测集 + few-shot，微调后置
+
+- **日期**：2026-10-24
+- **背景**：用户要学做 Skill，并让 AI 更有人味；询问语料数据集是否有用。
+- **决策**：
+  - 交付 `docs/skill-tutorial.md`（三课 + 练习 + 检查表）、`docs/corpus-and-style.md`、示例
+    `skills/style-humanizer`；Skill 通过 `skills/` + `install_skill.py` 版本化管理；
+  - 人味路线：先 **评测集（30–50 条）+ few-shot（20–40 条，放技能 references 按需读）**，
+    再考虑 `self_learning`（AGPL，自动风格/黑话/关系学习），最后才微调（≥500–1000 条干净授权样本）；
+  - 语料用 `qq-chat-exporter` 导出，本地清洗、脱敏、不入库；群聊语料需授权。
+- **放弃/后置**：立刻微调（成本/隐私/维护高）；直接上 self_learning（复杂 + AGPL）。
+- **风险**：语料涉及他人隐私；few-shot 会占 token；人评主观。
+- **验证**：教程可执行；`style-humanizer` 已安装并出现在 skills 列表；评测流程可复用 `eval_persona.py`。
+
+## D-016 Token 策略与实测
+
+- **日期**：2026-10-24
+- **背景**：ICL 200 条 + 历史是固定开销；需要量化省 token 而不是拍脑袋。
+- **决策/实测**：
+  - ICL 200 → **100**（约省一半群消息注入）；
+  - 压缩交给 memory_beyond（0.70 触发、摘要 gemini-flash、摘要 ≤1500 字、recall ≤3 条）；
+  - 新增 `scripts/context_report.py`（按会话 token_usage + 记忆目录占用）做基线/对比；
+  - 试过 `tool_schema_mode=skills_like`：工具声明 4110 vs 4066 tokens，**无收益**且多一次二阶段调用，
+    已回退 `full`；
+  - 当前单轮固定开销实测：约 7.8k tokens（固定开销 ~3.7k + 工具声明 ~4.1k + 记忆/历史）；
+    DeepSeek 有 prompt cache 命中（`/mb_status` 显示缓存命中 ~7k），实际成本显著低于全价。
+- **后续可选**：减少工具数量（自定义只读文件工具替代 local runtime）、关闭未用 builtin skills、
+  按群配不同模型/上下文。
+- **风险**：ICL 降低可能影响接梗；需群聊实测回归。
+- **验证**：`/mb_status` 分项、`context_report.py` 输出、健康检查。
