@@ -352,3 +352,20 @@
   - AstrBot 启动加载插件、创建数据集目录；healthcheck 通过。
 - **代码位置**：`plugins/astrbot_plugin_sticker_collector/`、`scripts/label_sticker_dataset.py`、
   `scripts/sticker_dataset_report.py`、`scripts/eval_sticker_understanding.py`、`docs/sticker-dataset.md`。
+
+## D-019 换机迁移：安全分层打包与网盘中转策略
+
+- **日期**：2026-10-31
+- **背景**：开发机无法常驻，用户需将项目打包上传至 Google Drive 网盘，后续下载至新设备恢复运行。
+- **调查与约束**：
+  - 密钥安全：`.env` 与 `data/cmd_config.json` 包含 API key，绝不能上传网盘；
+  - 存储体积：`tmp/` 曾含旧安装包（140+ MB），`backups/` 含历史及旧工程，直接整包压缩体积巨大且混杂无关文件；
+  - 依赖与状态：AstrBot 插件（如 memory_beyond）及本地配置均可通过脚本幂等重建，无需拷贝含有本地绝对路径与 DB 的 `data/` 全量目录；
+  - 数据集与记忆：用户收集的表情包数据及 Markdown 记忆为劳动成果，需要可选迁移，但应与源码解耦并防泄漏。
+- **决策**：
+  - 源码包（`qqbot-source-YYYYMMDD.zip`）：仅打包 tracked 文件与完整 `.git` 历史，包含恢复清单与 SHA256 校验；严格排除所有临时文件、备份、运行数据与密钥；
+  - 数据包（`qqbot-data-bundle-YYYYMMDD.zip`，可选）：仅打包 `sticker_dataset`、`plugin_data`（记忆文件）等非密钥数据，不含 `cmd_config.json` 与聊天数据库；
+  - 清理本地 `tmp/` 无关大文件缓存；
+  - 提供自动化打包脚本 `scripts/package_transfer.py` 和恢复文档 `docs/transfer-to-new-machine.md`。
+- **验证**：运行打包脚本生成 source 与 data 两个 zip 包，校验文件结构、解压合并路径与 SHA256 哈希。
+- **代码位置**：`scripts/package_transfer.py`、`docs/transfer-to-new-machine.md`。

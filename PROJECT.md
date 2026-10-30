@@ -62,6 +62,7 @@ QQ 小号 ⇄ NapCat 4.18.41（NTQQ 协议端，OneBot v11）
 - [x] **Skill 教学/人味（A-13）**：[skill-tutorial.md](docs/skill-tutorial.md)、[corpus-and-style.md](docs/corpus-and-style.md)、`skills/style-humanizer` 已安装
 - [x] **网页读取（A-14）**：自研 `web_reader` 插件（本地抓取正文+链接、SSRF 防护）；实测能顺着 whatasiger.xyz 首页链接挑文章并概括长文（DeepSeek fetch 首页只有 130 字且无链接，已降为 fallback）
 - [x] **表情包数据集（A-15）**：自研只采集插件（无发送/无 LLM 工具）+ `data/sticker_dataset` + 标注/统计/评测脚本；示例图已跑通标注（委屈/生气）；**不发送表情包**
+- [x] **换机迁移打包（A-16）**：整理仓库与缓存，提供 `scripts/package_transfer.py` 与 [docs/transfer-to-new-machine.md](docs/transfer-to-new-machine.md)，支持源码包与非密钥数据包分层打包、校验与 Google Drive 中转恢复（D-019）
 
 ## 4. 进行中 / 待验证
 
@@ -283,3 +284,13 @@ Token 策略与实测见 D-016；外部插件版本见 [docs/external-plugins.md
 - `image_caption_prompt` 改为表情包感知；人设要求理解表情包但不发送；
 - 验证：示例图标注出「委屈/生气/初音未来」，report/eval 可运行；插件加载、数据集目录、healthcheck 正常；
 - 已知限制：`mface` 段可能被 AstrBot 跳过；标注需人工复核；隐私仅本地。
+
+### A-16（2026-10-31）换机迁移打包与仓库整理
+
+- 本机不能常驻，支持上传 Google Drive 并迁移到新设备继续处理；
+- 清理 `tmp/` 中历史大文件（`tmp/upgrade` 143MB 与 `tmp/stealer-ref` 3.4MB），释放磁盘空间；
+- 编写安全分层打包脚本 `scripts/package_transfer.py`：
+  - 源码包 `qqbot-source-<date>.zip`：包含 tracked 源码、完整 `.git` 历史及元数据，严格排除 `.env`、`data/`、`backups/`、`tmp/`、日志与缓存，可安全上传网盘；
+  - 数据包 `qqbot-data-bundle-<date>.zip`（可选）：仅包含 `data/sticker_dataset`（表情包及标注）、`data/plugin_data`（memory_beyond 记忆）等非密钥数据；
+  - 自动为每个包生成 `.sha256` 校验文件；
+- 编写配套恢复手册 `docs/transfer-to-new-machine.md`：详细记录新环境依赖安装、配置一键生成、插件/技能恢复与验收步骤（D-019）。
