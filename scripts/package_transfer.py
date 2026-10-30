@@ -1,4 +1,4 @@
-"""Package the repo for transfer to another machine (and optional data bundle).
+r"""Package the repo for transfer to another machine (and optional data bundle).
 
 Creates, in ../qqbot-packages by default:
   qqbot-source-<date>.zip   tracked working tree + .git, no secrets/data/tmp/backups
