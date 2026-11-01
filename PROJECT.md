@@ -10,6 +10,6 @@
 - **背景**：创建 QQ 机器人项目 `qq-bot` 并开启 Claude Code Remote 会话。
 - **实施**：
   1. 初始化 Git 仓库，建立 `README.md`、`CLAUDE.md`、`AGENTS.md`。
-  2. 确立不执行写锁，统一使用 `PROJECT.md` + `DECISIONS.md`。
+  2. 确立统一使用 `PROJECT.md` + `DECISIONS.md`。
   3. 启动 `claude remote-control --name qq-bot --spawn same-dir` 会话服务。
 - **验证**：云端会话连接成功（Connected · qq-bot · master）。
