@@ -134,18 +134,37 @@ ALIYUN_KEY_FILE = KEY_FILE.with_name("aliyun.key")
 
 
 class AliyunEmbedder(Embedder):
-    """Bailian's OpenAI-compatible endpoint. It has no query/document task types, so both share one space."""
+    """Bailian's OpenAI-compatible endpoint.
 
-    batch = 25
+    By default no text_type is sent, which the endpoint treats as query mode for documents too
+    (found in the 2026-11-04 audit). `asymmetric=True` sends text_type=query/document by task,
+    and `instruct` is sent with queries only, as the Qwen3 Embedding paper does. Both settings
+    are part of the cache key, so vectors from different settings never mix; the default
+    settings keep the old keys and still hit the old cache.
+    """
 
-    def __init__(self, cache_path: Path, model: str = "qwen3.7-text-embedding-flash", dim: int = DIM):
+    batch = 20  # qwen3.7-text-embedding rejects more than 20 inputs per request
+
+    def __init__(self, cache_path: Path, model: str = "qwen3.7-text-embedding-flash", dim: int = DIM,
+                 asymmetric: bool = False, instruct: str = ""):
         super().__init__(cache_path, model, dim)
+        self.asymmetric, self.instruct = asymmetric, instruct
         self.last_tokens: list[int] = []
+
+    def _key(self, text: str, task: str) -> str:
+        variant = ""
+        if self.asymmetric or self.instruct:
+            variant = f"\0asym={int(self.asymmetric)}\0instruct={self.instruct if task == 'RETRIEVAL_QUERY' else ''}"
+        return hashlib.sha256(f"{self.model}\0{self.dim}\0{task}\0{text}{variant}".encode()).hexdigest()
 
     def _request(self, texts: Sequence[str], task: str) -> list[list[float]]:
         key = os.environ.get("QQBOT_ALIYUN_KEY") or ALIYUN_KEY_FILE.read_text(encoding="utf-8").strip()
-        body = json.dumps({"model": self.model, "input": [t or " " for t in texts], "dimensions": self.dim,
-                           "encoding_format": "float"}).encode()
+        payload = {"model": self.model, "input": [t or " " for t in texts], "dimensions": self.dim, "encoding_format": "float"}
+        if self.asymmetric:
+            payload["text_type"] = "query" if task == "RETRIEVAL_QUERY" else "document"
+        if self.instruct and task == "RETRIEVAL_QUERY":
+            payload["instruct"] = self.instruct
+        body = json.dumps(payload).encode()
         req = urllib.request.Request(ALIYUN_URL, body, {"Content-Type": "application/json", "Authorization": f"Bearer {key}"})
         delay = 5.0
         for _ in range(8):

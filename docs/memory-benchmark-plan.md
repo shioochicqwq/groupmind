@@ -1,7 +1,7 @@
 # Benchmark 方案
 
 > 状态：第 1–5 步和第 6 步的自动部分已跑第一轮（2026-11-03），框架在 `bench/`，人工打标工具已就绪。结果见 [第一轮结果](memory-benchmark-results.md)。
-> 2026-11-04：检索部分暂时冻结为四路 RRF、每路前 5、1500 字、交原文块（D-028），下一步测证据进入上下文后的使用效率。冻结版要在独立 TEST 集上验证。
+> 2026-11-04：检索部分暂时冻结为四路 RRF、每路前 5、1500 字、交原文块（D-028），下一步测证据进入上下文后的使用效率。冻结版要在独立 TEST 集上验证。阶段性报告见 [research/2026-11-memory-stage-report.md](research/2026-11-memory-stage-report.md)，下一阶段见 [路线图](research/2026-11-memory-next-stage-roadmap.md)。
 > 目标：让 [选项登记表](memory-options.md) 里的每个未决项都能靠数字决定，避免像多数被调研项目那样无法衡量效果。
 
 ## 1. 结论

@@ -70,3 +70,17 @@ def test_aliyun_splits_reported_tokens_and_keeps_order(tmp_path, monkeypatch):
     assert v[0][0] == 1.0 and v[1][1] == 1.0
     assert usage.summary()["向量|摘要"]["prompt"] == 30
     assert "secret-value" not in (tmp_path / "a.jsonl").read_text()
+
+
+def test_aliyun_settings_are_part_of_the_cache_key(tmp_path):
+    from bench.embed import AliyunEmbedder
+
+    plain = AliyunEmbedder(tmp_path / "c.jsonl")
+    asym = AliyunEmbedder(tmp_path / "c.jsonl", asymmetric=True)
+    inst = AliyunEmbedder(tmp_path / "c.jsonl", asymmetric=True, instruct="检索")
+    old = __import__("hashlib").sha256("qwen3.7-text-embedding-flash\x00768\x00RETRIEVAL_QUERY\x00问".encode()).hexdigest()
+    assert plain._key("问", "RETRIEVAL_QUERY") == old
+    keys = {e._key("问", "RETRIEVAL_QUERY") for e in (plain, asym, inst)}
+    assert len(keys) == 3
+    # The instruction only goes with queries, so documents share vectors across instructions.
+    assert asym._key("文", "RETRIEVAL_DOCUMENT") == inst._key("文", "RETRIEVAL_DOCUMENT")

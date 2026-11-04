@@ -84,7 +84,7 @@ def arm_conditions(name: str) -> dict:
     }.get(base) or depth_index(base)
     filtered = filter_view != "-" and not budget
     chunking = "10 条窗口" if base.startswith("ref:win10") else "5 条窗口" if base == "ref:win5" else "颜色块"
-    top_k = (int(base[1:].split(":")[0]) if base.startswith("K") else 10 if base.startswith("E") else 30) if budget else (NO_FILTER_TOP if base == "ref:win10" else TOP)
+    top_k = (int(re.match(r"K(\d+)", base).group(1)) if base.startswith("K") else 10 if base.startswith("E") else 30) if budget else (NO_FILTER_TOP if base == "ref:win10" else TOP)
     tokenizer = "qwen3.7-text-embedding-flash（768 维）" if base.startswith("V:") else (
         "jieba+习得词 + qwen3.7-text-embedding-flash" if base.startswith("DV") or base.endswith("4") else "jieba+习得词")
     return cond(
@@ -96,9 +96,11 @@ def arm_conditions(name: str) -> dict:
 
 def depth_index(base: str) -> tuple[str, str, str]:
     """K<n>:rrf4 arms of the depth experiment: E1 with n candidates per route."""
-    if not re.fullmatch(r"K\d+:rrf4", base):
+    m = re.fullmatch(r"K(\d+)([VM]\d)?:rrf4", base)
+    if not m:
         raise KeyError(base)
-    return (f"四路（关键词 + 向量）每路前 {base[1:].split(':')[0]}，全局 RRF，严格按名次打包", "-", "原文块（去重）")
+    vec = f"；向量 {m.group(2)}" if m.group(2) else ""
+    return (f"四路（关键词 + 向量）每路前 {m.group(1)}，全局 RRF，严格按名次打包{vec}", "-", "原文块（去重）")
 
 
 def within_budget(blocks, feed, budget: int) -> tuple[list, list[str]]:

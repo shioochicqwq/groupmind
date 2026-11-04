@@ -59,7 +59,7 @@ def cost_rows(folder: Path, split: str) -> list[dict]:
                         tokens={"上色": color}, when=_when(folder / "color.gemini-3.8-flash-high.cache.jsonl"),
                         raw=raw_ref(folder.parent, folder / "colors.gemini-3.8-flash-high.jsonl")))
     for name, title in (("questions", "出题和核题"), ("s0", "Q2 第一轮"), ("abcd", "主实验"), ("k", "梗表"),
-                        ("vector", "向量检索"), ("packing", "打包与保底"), ("depth", "候选深度")):
+                        ("vector", "向量检索"), ("packing", "打包与保底"), ("depth", "候选深度"), ("embed_qa", "向量配置问答")):
         own = shared(usage_of(folder, name))
         if own:
             rows.append(row(f"成本：{title}的共享调用（{split}）", "共享", cond(model_main=GEMINI), {}, dataset="QQ",
@@ -67,6 +67,14 @@ def cost_rows(folder: Path, split: str) -> list[dict]:
                             note="出题、核题、梗提取、写词条等不属于某一组的调用",
                             raw=raw_ref(folder.parent, folder / "s0.main.cache.jsonl")))
     return rows
+
+
+def with_three_state(original: dict, rows: list[dict]) -> dict:
+    """End-to-end accuracy (empty answers count as failures) stays the main number; effective
+    accuracy over non-empty answers and the empty rate sit beside it (bench.scoring)."""
+    from bench import scoring
+
+    return {**original, **scoring.three_state(rows)}
 
 
 def raw_ref(runs: Path, path: Path) -> str:
@@ -195,9 +203,9 @@ def q2(runs: Path, labels: Path | None) -> list[dict]:
                 cond(index=index, chunking="颜色块" if "颜色" in index else "10 条窗口", tokenizer="jieba" if name_of(arm).startswith("reference") else "jieba+习得词",
                      top_k=10, filter=flt, filter_view=view, feed=feed, model_main=GEMINI, model_filter=GEMINI,
                      judge=judge, seed=0),
-                {"n": sum(x["visible"] for x in arm["rows"]), **{k: arm[k] for k in (
+                with_three_state({"n": sum(x["visible"] for x in arm["rows"]), **{k: arm[k] for k in (
                     "accuracy", "accuracy_ci95", "refusal_when_absent", "empty_when_present")},
-                 "avg_msgs": arm["avg_msgs_injected"]},
+                 "avg_msgs": arm["avg_msgs_injected"]}, arm["rows"]),
                 dataset="QQ", split=split, data=data, when=_when(p),
                 tokens=for_arm(s0_usage, arm["arm"]) if judge == GPT else {},
                 raw=raw_ref(runs, arm_file(runs / "real-dev", "s0", arm["arm"])) if judge == GPT else "",
@@ -268,14 +276,16 @@ def abcd(runs: Path, folder: str = "real-dev", name: str = "abcd") -> list[dict]
     rows = []
     abcd_usage = usage_of(runs / folder, name)
     title = {"abcd": "R4/I3 检索对象 × 交给模型", "vector": "I4 向量检索（1500 字）", "packing": "E 打包与保底（1500 字）",
-             "depth": "K 候选深度（E1，1500 字）"}[name]
+             "depth": "K 候选深度（E1，1500 字）",
+             "embed_qa": "I5 向量配置（问答层，冻结版框架）"}[name]
     for arm_name, a in r["arms"].items():
         from bench.run_abcd import arm_conditions
 
         c = a.get("conditions") or arm_conditions(arm_name)
+        original = {"n": sum(x["visible"] for x in a["rows"]), **{k: v for k, v in a.items() if k not in ("rows", "conditions")}}
         rows.append(row(
             f"{title}（{SPLIT.get(r['group'], r['group'])}）", arm_name, c,
-            {"n": sum(x["visible"] for x in a["rows"]), **{k: v for k, v in a.items() if k not in ("rows", "conditions")}},
+            with_three_state(original, a["rows"]),
             dataset="QQ", split=SPLIT.get(r["group"], r["group"]), when=_when(path), data=r.get("data", {}),
             tokens=for_arm(abcd_usage, arm_name),
             raw=raw_ref(runs, arm_file(runs / folder, name, arm_name)),
@@ -286,5 +296,5 @@ def abcd(runs: Path, folder: str = "real-dev", name: str = "abcd") -> list[dict]
 def backfill(runs: Path) -> list[dict]:
     labels = runs.parent / "labels" / "round1" / "merged.json"
     costs = cost_rows(runs / "real-dev", "DEV-1") + cost_rows(runs / "real-dev2", "DEV-2")
-    tables = [abcd(runs, f, n) for f in ("real-dev", "real-dev2") for n in ("abcd", "vector", "packing", "depth")]
+    tables = [abcd(runs, f, n) for f in ("real-dev", "real-dev2") for n in ("abcd", "vector", "packing", "depth", "embed_qa")]
     return gmb(runs) + q1(runs) + q2(runs, labels) + k(runs) + sum(tables, []) + costs
