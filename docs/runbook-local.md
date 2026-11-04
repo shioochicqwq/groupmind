@@ -2,10 +2,13 @@
 
 ## 前置条件
 
-- Windows + 已安装 QQNT（`C:\Program Files\Tencent\QQNT`）
-- `uv`（已装）；AstrBot 已通过 `uv tool install astrbot --python 3.12` 安装（v4.29.1）
-- NapCat 位于 `D:\Apps\NapCat`（复用既有安装）
-- 仓库根目录 `D:\qqbot`
+> 协议端已从 NapCat 改为 SnowLuma（D-021）。本手册的 SnowLuma 步骤依据 v2.3.3 文档与源码编写，**尚未在 Windows 上实测**。
+> 全新机器的安装步骤见 [transfer-to-new-machine.md](transfer-to-new-machine.md)。
+
+- Windows + 已安装桌面版 QQ（NTQQ）
+- `uv`；AstrBot 通过 `uv tool install astrbot --python 3.12` 安装（v4.29.1）
+- SnowLuma v2.3.3 完整版解压到 `C:\SnowLuma`（其他位置写入 `.env` 的 `SNOWLUMA_HOME`）
+- 仓库根目录 `D:\qqbot`（示例路径）
 
 ## 启动顺序
 
@@ -17,29 +20,28 @@
 
    - WebUI：`http://127.0.0.1:6185`，用户名 `astrbot`
    - 初始密码见第一次启动日志，**首次登录后立即修改**
-   - OneBot 反向 WS 监听：`0.0.0.0:6199`（路径 `/ws`）
+   - OneBot 反向 WS 监听：`127.0.0.1:6199`（路径 `/ws`，需要 `ONEBOT_WS_TOKEN`）
 
-2. **启动 NapCat**（会自动结束已存在的 QQ 进程）：
+2. **启动 SnowLuma 和 QQ**（顺序不限，SnowLuma 发现 `QQ.exe` 后自动注入）：
 
    ```powershell
-   # 首次 / 设备或版本变化后：扫码登录
-   pwsh -File D:\qqbot\deploy\windows\start-napcat.ps1 -KillExisting
-
-   # 已保存登录态时：尝试快速登录（可能仍要求手机 QQ 验证，则回退扫码）
-   pwsh -File D:\qqbot\deploy\windows\start-napcat.ps1 -QuickLogin <BOT_QQ>
+   pwsh -File D:\qqbot\deploy\windows\start-snowluma.ps1
    ```
 
-   - 控制台会打印登录二维码；二维码同时保存到 `D:\Apps\NapCat\cache\qrcode.png`
-   - 推荐打开 WebUI 扫码（二维码自动刷新）：
-     `http://127.0.0.1:6099/webui?token=<见 D:\Apps\NapCat\config\webui.json>`
-   - **NapCat 版本**：当前 v4.18.41（2026-10-24 从 4.18.28 升级，修复 QQ 9.9.32 Packet 兼容问题）。
-     旧安装备份在 `D:\Apps\NapCat.bak-*`。
-   - 升级 NapCat 时：停 QQ/NapCat → 解压新版 `NapCat.Shell.zip` 覆盖安装目录（**保留 `config/`**）
-     → 重新执行 `python scripts\patch_napcat_onebot.py` → 扫码登录。
-   - 启动脚本会把工作目录切到 `D:\Apps\NapCat`，避免 QQ 在仓库根写 `guild*.db`。
+   - 在桌面 QQ 窗口里用手机 QQ **扫码登录**小号（只支持扫码）；
+   - WebUI：`http://127.0.0.1:5099/`，用户名 `admin`，初始密码只在全新目录首次启动时打印一次；
+   - 首次启动要在同意页确认 EULA 和隐私政策；
+   - **QQ 和 SnowLuma 必须是同一 Windows 用户、同一权限**（都不用管理员运行），否则注入失败；
+   - 配置由 `python scripts\configure_snowluma.py` 生成，不要只在 WebUI 改 token，否则与 AstrBot 不一致。
 
 3. **验证连接**：AstrBot 控制台应出现 `aiocqhttp(OneBot v11) 适配器已连接。`
-   若没有，检查 NapCat 的 WS 客户端是否启用、URL 是否为 `ws://127.0.0.1:6199/ws`。
+   若没有，检查 `C:\SnowLuma\config\onebot.json` 的 `wsClients`：URL 是否为 `ws://127.0.0.1:6199/ws`，
+   `accessToken` 是否与 `.env` 的 `ONEBOT_WS_TOKEN` 相同；日志 401/403 就是 token 问题。
+
+### 升级 SnowLuma / QQ
+
+SnowLuma 的 hook 按 QQ 版本对齐，官方 `compat/qq.json` 目前没有列出已验证版本。所以要**关闭 QQ 自动更新**，
+验收通过后记下可用的 QQ 版本；升级时停 QQ/SnowLuma → 解压新版覆盖（**保留 `config/` 和数据目录**）→ 跑体检。
 
 ## LLM 配置
 
@@ -99,8 +101,8 @@ $env:ASTRBOT_DASHBOARD_PASSWORD='<WebUI 密码>'
 python scripts\healthcheck.py
 ```
 
-检查：4 个端口、NapCat 登录/在线状态、AstrBot 平台适配器、6 个 LLM provider、人格。
-全部 PASS 退出码为 0；任何 FAIL 退出码 1（VPS 上同样适用，日志用 journalctl 对照）。
+检查：4 个端口、SnowLuma 登录/在线状态（token 自动从 `.env` 读取）、AstrBot 平台适配器、6 个 LLM provider、人格。
+全部 PASS 退出码为 0；任何 FAIL 退出码 1。
 
 ## 联网搜索 / 多模态 / Skill / 插件
 
@@ -184,14 +186,12 @@ python scripts\eval_sticker_understanding.py --limit 10
 
 ## 掉线 / 漏消息恢复
 
-- 现象：NapCat 日志出现 `[KickedOffLine] 你的账号当前登录已失效`，端口 3000 消失、bot 不回消息。
-  通常是**同账号在别的设备/客户端登录**或 QQ 安全验证导致。
-- 恢复：打开 `http://127.0.0.1:6099/webui?token=<token>` 扫码重登（选对应小号），
-  等 AstrBot 日志重新出现「适配器已连接」，再跑 `scripts/healthcheck.py`。
-- **补回漏掉的消息**：重登后离线期间的消息不会进 AstrBot，可用 NapCat 的
-  `get_friend_msg_history` / `get_group_msg_history` 拉最近消息，再按人设手动补回复
-  （本项目 2026-10-24 已用该方式补回两条）。
-- 预防：小号只给 NapCat 用，不在手机/其他 PC 客户端同时登录；保持扫码环境固定。
+- 现象：bot 不回消息，`scripts/healthcheck.py` 的 SnowLuma 登录/在线状态 FAIL。
+  通常是**同账号在别的设备/客户端登录**或 QQ 安全验证导致（2026-10-24 在 NapCat 上遇到过，SnowLuma 上未复现）。
+- 恢复：在桌面 QQ 窗口重新扫码，等 AstrBot 日志重新出现「适配器已连接」，再跑 `scripts/healthcheck.py`。
+- **补回漏掉的消息**：重登后离线期间的消息不会进 AstrBot，可用 OneBot 动作
+  `get_friend_msg_history` / `get_group_msg_history` 拉最近消息，再按人设手动补回复。
+- 预防：小号只给这台 PC 用，不在手机/其他 PC 客户端同时登录；保持扫码环境固定。
 
 ## 群聊测试
 
@@ -202,8 +202,9 @@ python scripts\eval_sticker_understanding.py --limit 10
 ## 停止与重启
 
 - AstrBot：终止 `python.exe`（AstrBot）进程后重新运行启动脚本；
-- NapCat：结束 `QQ.exe` / `NapCatWinBootMain.exe` 后重新运行启动脚本；
-- 两者均无服务化守卫，VPS 阶段改由 Docker Compose 的 `restart: unless-stopped` 负责。
+- SnowLuma：关闭它的控制台窗口后重新运行启动脚本；
+- 常驻 PC：`pwsh -File deploy\windows\register-autostart.ps1` 注册登录时启动的计划任务（带 `-KeepAlive` 自动重启），
+  `-Unregister` 撤销。任务只在用户登录后运行，因为 QQ 需要桌面会话，所以这台 PC 要开自动登录并关闭睡眠。
 
 ## 常见问题
 
@@ -211,14 +212,16 @@ python scripts\eval_sticker_understanding.py --limit 10
 |---|---|
 | AstrBot 日志 `references environment variable ... not set` | `.env` 未配置对应 key，配置后重启 |
 | Provider 初始化失败 `Missing credentials` | 同上 |
-| NapCat 报 `未找到对应版本的偏移数据` / `PacketBackend 不支持当前QQ版本架构` | NapCat 与 QQ 版本不匹配；查 NapCat release 兼容表并升级 NapCat（D-008） |
-| NapCat 升级后快速登录提示「登录需要手Q验证」 | 正常设备校验，改用二维码扫码登录 |
+| SnowLuma 注入失败 / QQ 不上线 | 确认 QQ 与 SnowLuma 用户和权限一致；QQ 是否自动升级到了新版本 |
+| 重启后没有自动注入 | `config/runtime.json` 的 `hookAutoLoad` 应为 `true`；账号级 `onebot_<uin>.json` 可能覆盖全局配置 |
+| WebUI 密码找不到 | 只在全新目录首次启动时打印一次，翻首次启动日志 |
+| 端口 3000 / 5099 被占用 | 改 `onebot.json` / `runtime.json` 的端口，同时给 `healthcheck.py` 传 `--snowluma` |
 | 端口 6199 被占用 | 查 `Get-NetTCPConnection -LocalPort 6199`，结束旧 AstrBot 进程 |
-| 二维码过期 | 重新打开 NapCat WebUI 刷新，或重启 NapCat |
 | 群聊不回复 | 确认已 @、平台 enable、WS 已连接、provider 有 key |
 
 ## 安全注意
 
 - `data/` 含 WebUI 密码哈希、JWT secret、聊天记录；`.env` 含 API Key —— 均不提交 git。
-- NapCat WebUI 默认无访问控制且监听所有网卡，仅限本机/内网使用；VPS 必须加防火墙。
+- SnowLuma 的 WebUI 和 OneBot 端口能完全控制 QQ 账号：配置已绑定 `127.0.0.1`，防火墙弹窗不要放行公网，不要转发这些端口。
+- SnowLuma 仅限非商业使用，含闭源原生组件，并以注入方式接入 QQ；EULA 写明可能违反平台条款并带来账号风险（D-021）。
 - 小号有风控风险：控制发言频率、避免敏感内容、先养号。

@@ -24,9 +24,13 @@
 
 ## 1. 新机器前置
 
-- Windows：Python 3.12 + `uv`；安装 AstrBot（`uv tool install astrbot --python 3.12`）；
-- QQ/NapCat：按 [runbook-local.md](runbook-local.md) 安装 NapCat（版本 4.18.41），
-  **需要重新扫码登录**（QQ 登录态在 NapCat 目录，不在本仓库）；
+> 目标机器：常驻 Windows PC（D-021）。SnowLuma 相关步骤**尚未实测**，首次部署时按第 5 节验收后回填本文档。
+
+- Windows x64，PowerShell 7（`pwsh`）、Git、Python 3.12 + `uv`；安装 AstrBot（`uv tool install astrbot --python 3.12`）；
+- 桌面版 QQ（NTQQ），**关闭自动更新**；
+- SnowLuma：从 [Releases](https://github.com/SnowLuma/SnowLuma/releases) 下载 `SnowLuma-v2.3.3-win-x64.zip`
+  （完整版，内置 Node.js），解压到 `C:\SnowLuma`；
+- **需要重新扫码登录**（QQ 登录态不在本仓库）；
 - 网络能访问 LLM 端点（DeepSeek / 聚合端点）。
 
 ## 2. 恢复步骤
@@ -39,28 +43,40 @@ cd D:\qqbot
 Copy-Item .env.example .env
 notepad .env
 
-# 3) 生成 AstrBot 配置（平台/模型/人格/记忆/文件工具/网页工具）
+# 3) 生成 SnowLuma 配置，并把缺失的 ONEBOT_WS_TOKEN / SNOWLUMA_HTTP_TOKEN 写入 .env
+python scripts\configure_snowluma.py
+
+# 4) 初始化 AstrBot 数据目录，再写入配置（平台/模型/人格/记忆/文件工具/网页工具）
+astrbot init -y
 python scripts\bootstrap_astrbot_config.py
 
-# 4) 安装外部依赖插件 memory_beyond（固定提交，见 docs/external-plugins.md）
+# 5) 安装外部依赖插件 memory_beyond（固定提交，见 docs/external-plugins.md）
 git clone https://github.com/AlanBacker/astrbot_plugin_memory_beyond data\plugins\astrbot_plugin_memory_beyond
 git -C data\plugins\astrbot_plugin_memory_beyond checkout 0ec75bfb1a36a416121088d19acd7027ac9c0274
 
-# 5) 安装本项目插件 + 技能
+# 6) 安装本项目插件 + 技能
 python scripts\install_plugin.py --force
 python scripts\install_skill.py --force
 
-# 6) NapCat：修改 D:\Apps\NapCat\config\onebot11_<QQ>.json 指向本机
-python scripts\patch_napcat_onebot.py --config <NapCat 配置路径>
-# 或按 runbook 手动加反向 WS ws://127.0.0.1:6199/ws
-
-# 7) 启动 AstrBot + NapCat，扫码登录，体检
+# 7) 启动 AstrBot，修改初始密码后写入人设
 pwsh -File deploy\windows\start-astrbot.ps1
+$env:ASTRBOT_DASHBOARD_PASSWORD='<WebUI 密码>'
+python scripts\apply_persona.py --file config\personas\example.json
+
+# 8) 新开一个窗口启动 SnowLuma，到 http://127.0.0.1:5099/ 确认 EULA 和隐私政策，再打开 QQ 扫码登录
+pwsh -File deploy\windows\start-snowluma.ps1
+
+# 9) 体检
 python scripts\healthcheck.py
+
+# 10) 验收通过后再开启常驻：注册计划任务，并开启 Windows 自动登录、关闭睡眠
+pwsh -File deploy\windows\register-autostart.ps1
 ```
 
-> 第 3 步会覆盖 `data/cmd_config.json`（新机器没有 data，没关系）。如果从 data bundle 恢复了
+> 第 4 步要求 `data/cmd_config.json` 已存在，所以必须先 `astrbot init -y`。如果从 data bundle 恢复
 > 记忆/数据集，先执行 bootstrap，再把 bundle 的非密钥文件覆盖进去；**不要**恢复旧 `cmd_config.json`（它含 key）。
+>
+> 平台 id 已从 `napcat` 改为 `snowluma`，会话键也随之改变：bundle 里 `napcat_FriendMessage_*` 的会话状态不会被新会话沿用。
 
 ## 3. 可选：数据包（记忆 / 表情包数据集）
 
@@ -90,7 +106,7 @@ python scripts\package_transfer.py --data-bundle
 ## 5. 新机器验收
 
 ```powershell
-python scripts\healthcheck.py     # 端口/NapCat/Bot/模型/记忆/文件/网页工具/表情包采集
+python scripts\healthcheck.py     # 端口/SnowLuma/Bot/模型/记忆/文件/网页工具/表情包采集
 python scripts\smoke_llm.py --no-stream --message "在吗"
 ```
 

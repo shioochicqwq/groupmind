@@ -1,10 +1,13 @@
-"""Bootstrap local AstrBot config for NapCat (OneBot v11) + DeepSeek.
+"""Bootstrap local AstrBot config for SnowLuma (OneBot v11) + DeepSeek.
 
 Idempotent: safe to re-run. Provider API keys are NOT written into the config
 file; providers reference ``$VAR`` entries expanded by AstrBot, with real keys
-in ``.env``. Exception: AstrBot's web-search key (``websearch_deepseek_key``)
-has no env-ref support, so it is written literally from ``.env`` into the
-gitignored ``data/cmd_config.json``.
+in ``.env``. Exceptions: AstrBot's web-search key (``websearch_deepseek_key``)
+and the reverse WS token have no env-ref support, so they are written literally
+from ``.env`` into the gitignored ``data/cmd_config.json``.
+
+Requires ``data/cmd_config.json`` (run ``astrbot init -y`` first) and
+``ONEBOT_WS_TOKEN`` in ``.env`` (run ``scripts/configure_snowluma.py`` first).
 
 Usage:
     python scripts/bootstrap_astrbot_config.py
@@ -44,19 +47,24 @@ def upsert(items: list[dict], item: dict) -> None:
 
 def main() -> None:
     load_dotenv(ENV_PATH)
+    if not CFG_PATH.is_file():
+        raise SystemExit(f"{CFG_PATH} not found: run `astrbot init -y` in the repo root first")
+    ws_token = os.environ.get("ONEBOT_WS_TOKEN", "").strip()
+    if not ws_token:
+        raise SystemExit("ONEBOT_WS_TOKEN not set: run scripts/configure_snowluma.py first")
     # AstrBot reads/writes this file as utf-8-sig (BOM); match it.
     cfg = json.loads(CFG_PATH.read_text(encoding="utf-8-sig"))
 
-    # --- 消息平台：OneBot v11 反向 WebSocket（NapCat 作为客户端接入） ---
+    # --- 消息平台：OneBot v11 反向 WebSocket（SnowLuma 作为客户端接入，同机部署只听回环） ---
     upsert(
         cfg.setdefault("platform", []),
         {
-            "id": "napcat",
+            "id": "snowluma",
             "type": "aiocqhttp",
             "enable": True,
-            "ws_reverse_host": "0.0.0.0",
+            "ws_reverse_host": "127.0.0.1",
             "ws_reverse_port": 6199,
-            "ws_reverse_token": "",
+            "ws_reverse_token": ws_token,
         },
     )
 
@@ -138,6 +146,9 @@ def main() -> None:
     deepseek_key = os.environ.get("DEEPSEEK_API_KEY", "").strip()
     pset["websearch_deepseek_key"] = [deepseek_key] if deepseek_key else []
     pset["web_search_link"] = True
+
+    # --- 发送者标注交给 memory_beyond，内置标注关闭以免重复（D-013） ---
+    pset["identifier"] = False
 
     # --- 多模态：用视觉模型给图片做 caption，文本模型也能"看图" ---
     pset["default_image_caption_provider_id"] = "gemini-3.8-flash"

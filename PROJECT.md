@@ -1,20 +1,23 @@
 # PROJECT.md — QQ AI 群聊 Bot
 
 > 状态记录与架构入口。变更代码/配置后同步更新本文件；重要决策见 `DECISIONS.md`。
-> 最近更新：2026-10-24
+> 最近更新：2026-11-01
 
 ## 1. 项目目标与范围
 
 - **目标**：让一个 QQ 小号在群聊中提供「像群友一样的 AI 陪聊/整活」能力，支持随时更换 LLM 模型/提供商。
-- **当前范围**：单账号、群聊场景（@ 触发为主 + 后续低频主动插话）、Windows 本地验证。
+- **当前范围**：单账号、群聊场景（@ 触发为主 + 后续低频主动插话）。
 - **明确不做**（当前阶段）：QQ 官方机器人接入、多平台、商业客服、语音/视频。
-- **最终形态**：部署到 Linux VPS 长期运行（Docker Compose：AstrBot + NapCat）。
+- **最终形态**：部署到常驻 Windows PC 长期运行（AstrBot + SnowLuma，D-021，尚未部署）。
 
 ## 2. 架构
 
+> 协议端已于 2026-11-01 决定从 NapCat 改为 SnowLuma（D-021），配置已准备但**未部署、未实测**。
+> 本节下文和第 3、5 节里的 NapCat、`D:\` 路径与 VPS 内容是旧机器的历史记录。
+
 ```
-QQ 小号 ⇄ NapCat 4.18.41（NTQQ 协议端，OneBot v11）
-        ⇄ 反向 WebSocket ws://127.0.0.1:6199/ws
+QQ 小号 ⇄ 桌面 QQ + SnowLuma v2.3.3（OneBot v11）
+        ⇄ 反向 WebSocket ws://127.0.0.1:6199/ws（token 鉴权）
         ⇄ AstrBot 4.29.1（消息分发 / 人格 / 上下文 / 插件 / LLM 编排）
         ├─ memory_beyond：事实记忆本子 + 上下文压缩（Markdown，data/plugin_data）
         ├─ Skill：data/skills/<name>/SKILL.md（模型用文件工具按需读取）
@@ -69,7 +72,8 @@ QQ 小号 ⇄ NapCat 4.18.41（NTQQ 协议端，OneBot v11）
 - [x] **QQ 私聊实测通过**（2026-10-24 17:10）：主号发「在吗」→ example 回「在呢，周六了还找我啥事」
 - [ ] **QQ 文件附件实测**：你在 QQ 私聊/群聊发 `.txt`/`.pdf`/`.docx`，验证「总结这个文件」可用（机制已用 `data/temp` 文件验证）
 - [ ] 群聊实测：用户确认现有群 `<GROUP_ID>` 不作为测试群；**暂缓**，待有合适的测试群再验收 @ 回复/上下文/主动插话
-- [ ] VPS 原生部署（**用户暂缓**，等 VPS 就绪）：按 `deploy/linux/native/README.md` + [migration-vps.md](docs/migration-vps.md) 执行
+- [ ] 常驻 Windows PC 部署（**用户暂缓**）：按 [transfer-to-new-machine.md](docs/transfer-to-new-machine.md) 执行，并验收 SnowLuma 链路（D-021）
+- [ ] VPS 原生部署：已不是当前路线（D-021）
 
 ## 5. 关键路径与端口
 
@@ -294,3 +298,68 @@ Token 策略与实测见 D-016；外部插件版本见 [docs/external-plugins.md
   - 数据包 `qqbot-data-bundle-<date>.zip`（可选）：仅包含 `data/sticker_dataset`（表情包及标注）、`data/plugin_data`（memory_beyond 记忆）等非密钥数据；
   - 自动为每个包生成 `.sha256` 校验文件；
 - 编写配套恢复手册 `docs/transfer-to-new-machine.md`：详细记录新环境依赖安装、配置一键生成、插件/技能恢复与验收步骤（D-019）。
+
+### A-17（2026-11-01）从 Google Drive 恢复仓库到新机器
+
+- 用户决定以 Drive 上的 `qqbot-source-20261031.zip` 作为开发仓库，取代新机器上初始化的 `qq-bot` 仓库（D-020）；
+- 源码包与数据包的 SHA256 均与随附校验文件一致，`git fsck` 无报错；
+- 路径 `/home/<user>/projects/qq-bot` 不变，`master` 现为 Drive 历史（`5747219`），旧历史保留在本地分支 `legacy/bootstrap`（`ca800f0`）；
+- 保留包内未提交的 `AGENTS.md` 改动与 `TRANSFER_MANIFEST.txt`；保留旧仓库的 `CLAUDE.md`、`README.md`（均未跟踪）；
+- 未解压数据包，未安装依赖，未运行项目代码或测试；`docs/transfer-to-new-machine.md` 的恢复与验收步骤尚未执行；
+- Drive 上的 `qqbot/qqnt_export_work/` 是 QQ 聊天记录数据，计划作为研究测试样本，本次未下载。
+
+### A-18（2026-11-01）协议端改为 SnowLuma，配置面向常驻 Windows PC（未部署）
+
+- 用户决定弃用 NapCat、改用 SnowLuma，未来部署到常驻 Windows PC，当前不部署（D-021）；
+- 新增 `scripts/configure_snowluma.py`（生成 `onebot.json` / `runtime.json`，token 写入 `.env`）、`deploy/windows/start-snowluma.ps1`、`deploy/windows/register-autostart.ps1`；`start-astrbot.ps1` 增加 `-KeepAlive`；
+- 删除 `deploy/windows/start-napcat.ps1`、`scripts/patch_napcat_onebot.py`；
+- `bootstrap_astrbot_config.py`：平台 id 改为 `snowluma`，反向 WS 只听 `127.0.0.1` 并启用 token；缺配置时给出明确报错；补上文档已声明但脚本遗漏的 `identifier=false`；
+- `healthcheck.py` 改查 SnowLuma 端口并带 token；更新 `.env.example`、运行手册与恢复手册；Linux 文档标记为历史参考；
+- 验证：用临时副本运行配置脚本和 bootstrap（幂等、备份、两端 token 一致）；`healthcheck.py` 在无服务时能正常报 FAIL；
+- **未验证**：SnowLuma 未运行，PowerShell 脚本未执行过（本机是 Linux 且没有 `pwsh`），QQ 注入、AstrBot 连接、QQ 收发均待部署时验收。
+
+### A-19（2026-11-02）长期记忆系统需求确认与设计草案
+
+- 与用户逐项确认长期记忆系统的需求，调研现有项目、记忆评测论文与模型渠道；
+- 查阅 Drive 中聊天导出的说明文档（未读取聊天内容、密钥和数据库）；
+- 新增 [docs/memory-system-design.md](docs/memory-system-design.md)：需求、依据、架构、评测和第一阶段计划，**待用户审阅，尚无实现**（D-022）。
+
+### A-20（2026-11-02）记忆相关开源项目调研
+
+- 审计 10 个指定项目（共 14 个仓库）的源码、测试和自建评测，报告见 [docs/research/2026-11-memory-project-survey.md](docs/research/2026-11-memory-project-survey.md)；
+- 结论：未发现能表达上色或满足 QQ 人物身份需求的项目，这两层需要自建；心跳和伪学习在聊天场景的收益未被证明，不进入最小架构；
+- 验证：部分无依赖测试在无网沙箱实跑；未安装插件，未调用模型；大型仓库为抽读。A 级项目未提供名单，未单独审计。
+
+### A-21（2026-11-02）知识习得与伪学习调研
+
+- 用户将持续知识习得列为核心方向，并提供 S/A 级名单（D-023）；
+- 按名单审计，并追加与梗学习直接相关的 MaiBot、qq-bridge，报告见 [docs/research/2026-11-knowledge-acquisition-survey.md](docs/research/2026-11-knowledge-acquisition-survey.md)；
+- 结论：现有项目能存解释，但都未评测学习后的实际运用；提出四级含义状态和离线评测设计；
+- 验证：本轮只读源码，未运行测试和模型；部分 A 级项目只看 README。
+
+### A-22（2026-11-02）选项登记与 benchmark 方案
+
+- 新增 [docs/memory-options.md](docs/memory-options.md)：保留各决策点的多个选项，等实验结果决定；
+- 新增 [docs/memory-benchmark-plan.md](docs/memory-benchmark-plan.md)：调查现成 benchmark，提出公共 + 真实群聊两层方案；
+- 补读 A_memorix、dsh-heartbeat、dsh-j-space，并在调研报告 12a 节逐项回答「调研后决定」的选项；
+- 验证：公共 benchmark 的数字取自论文，未下载或复现；方案尚未实现，待用户审阅。
+
+### A-23（2026-11-02）确定实验起点
+
+- 用户说明原文喂给模型、上色即分块；逐项选定起点，调研方案改为对照（D-024）；
+- 重写 [docs/memory-options.md](docs/memory-options.md)，更新 benchmark 方案和设计文档；尚无实现。
+
+### A-24（2026-11-02）benchmark 第一轮
+
+- 新增 `bench/` 评测框架和 `tests/bench/`，真实数据和运行结果放在仓库外的 `qqbot-data/`。
+- GroupMemBench 验证通过（44.6%，论文 46.0%）；S0 与基线的第一批对比见 [docs/memory-benchmark-results.md](docs/memory-benchmark-results.md)。
+- 批量模型调用走本地模型网关 的 `gemini-3.8-flash-high`，判官用 `gpt-6.1-sol`，不用 Claude 模型。
+- 梗表第一次测出提升；`bench/labeling.py` 生成多人离线打标页，第一轮 3 份在 `qqbot-data/labels/round1/`。
+
+### A-25（2026-11-04）检索版本冻结
+
+- 主实验在 DEV-2 复现；完成向量检索、打包与保底（E1–E4）、候选深度（K3–K30）三组实验，各组的条件、结果、分角色 token 和逐题原始记录都记在台账里（`docs/memory-benchmark-ledger.md`）。
+- 冻结当前检索版本：四路 RRF、每路前 5、1500 字、交原文块（D-028）。
+- 候选深度实验按完整请求的哈希复用历史回答，约一半回答和九成以上判定不必重跑。
+- 下一步：证据进入上下文之后，模型用得好不好。
+

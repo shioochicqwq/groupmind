@@ -12,7 +12,7 @@
 | 长期记忆 | memory_beyond 的 Markdown 事实文件 + 索引 + 按需召回 | people 开 / global 关 / recall≤3 |
 | 压缩 | memory_beyond 滚动摘要（0.70 触发），摘要用便宜模型 | gemini-3.8-flash，摘要≤1500 字 |
 
-会话隔离：私聊 `napcat:FriendMessage:<QQ>`、群聊 `napcat:GroupMessage:<群号>`，互不串；`/reset` 清当前会话。
+会话隔离：私聊 `snowluma:FriendMessage:<QQ>`、群聊 `snowluma:GroupMessage:<群号>`，互不串；`/reset` 清当前会话。
 
 ## 2. 记忆本子（memory_beyond）
 

@@ -1,5 +1,7 @@
 # 迁移清单：Windows 本地 → Linux VPS（原生 systemd，无 Docker）
 
+> **已不是当前路线（D-021）**：现在的目标是常驻 Windows PC + SnowLuma，见 [transfer-to-new-machine.md](transfer-to-new-machine.md)。本文仍是 NapCat 方案，仅作历史参考。
+
 > 原则：**整体迁移 AstrBot 的 `data/` 目录**，不在 VPS 上重新初始化（WebUI 密码、JWT、会话、插件配置都在里面）。
 > 部署方式与选型：`DECISIONS.md` D-005 / D-011；原生步骤：`deploy/linux/native/README.md`。
 > 风险：海外 VPS 上 QQ 协议端风控更严，扫码后可能还要手机验证。

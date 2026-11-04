@@ -1,0 +1,6 @@
+qqbot source bundle
+commit: 5747219
+dirty: True
+generated: 2026-10-31T00:39:01
+excluded: .env, data/, tmp/, backups/, logs, caches
+restore: see docs/transfer-to-new-machine.md

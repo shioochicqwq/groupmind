@@ -1,0 +1,320 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>群聊记忆打标</title>
+<style>
+:root{--bg:#f6f5f2;--card:#fff;--ink:#1f2328;--dim:#6b7280;--line:#dfdcd5;--accent:#2f5fb3;--accent-ink:#fff;--mark:#fdf1c7;--ok:#1d7a46;--warn:#a2590a}
+@media (prefers-color-scheme:dark){:root{--bg:#17191c;--card:#22252a;--ink:#e8e9eb;--dim:#9aa1ab;--line:#373b42;--accent:#7ba4ec;--accent-ink:#10141b;--mark:#4a4020;--ok:#61c58c;--warn:#e0a35c}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.6 system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif}
+main{max-width:720px;margin:0 auto;padding:16px}
+header{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;margin-bottom:12px}
+h1{font-size:18px;margin:0;flex:1 1 auto}
+nav{display:flex;gap:6px}
+nav button{padding:6px 12px}
+nav button[aria-pressed=true]{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.bar{height:6px;background:var(--line);border-radius:3px;overflow:hidden;margin-bottom:6px}
+.bar i{display:block;height:100%;background:var(--accent);width:0}
+.count{font-size:14px;color:var(--dim);margin-bottom:12px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px;margin-bottom:12px}
+.kind{font-size:13px;color:var(--dim);margin-bottom:4px}
+.big{font-size:18px;font-weight:600;margin:0 0 8px}
+.label{font-size:13px;color:var(--dim);margin-top:12px}
+.chat{margin-top:4px;border-left:3px solid var(--line);padding-left:10px;overflow-wrap:anywhere}
+.chat div{padding:2px 0}
+.chat .who{color:var(--dim);font-size:13px;margin-right:6px}
+.chat .gold{background:var(--mark);border-radius:4px;padding:2px 4px}
+.chat .near{color:var(--dim)}
+button{font:inherit;color:var(--ink);background:var(--card);border:1px solid var(--line);border-radius:8px;padding:10px 12px;cursor:pointer}
+button:hover{border-color:var(--accent)}
+button:focus-visible,input:focus-visible,textarea:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.choices{display:grid;gap:8px;margin-top:12px}
+.choices button{text-align:left;display:flex;gap:10px;min-height:44px;align-items:center}
+.choices kbd{font:12px ui-monospace,monospace;color:var(--dim);border:1px solid var(--line);border-radius:4px;padding:0 5px}
+.choices button.sel{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.choices button.sel kbd{color:inherit;border-color:currentColor}
+textarea,input[type=text],input[type=search]{font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:8px 10px;width:100%}
+textarea{min-height:64px;resize:vertical}
+.row{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px;align-items:center}
+.row .grow{flex:1 1 auto}
+.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.hint{font-size:14px;color:var(--dim)}
+.hit{display:block;width:100%;text-align:left;padding:6px 8px;margin-top:4px;overflow-wrap:anywhere}
+.hit.sel{border-color:var(--accent);background:var(--mark)}
+.status{font-size:14px;color:var(--ok);min-height:1.4em;margin-top:8px}
+.status.bad{color:var(--warn)}
+[hidden]{display:none!important}
+</style>
+</head>
+<body>
+<main>
+<header>
+  <h1>群聊记忆打标</h1>
+  <nav>
+    <button id="tab-cards" aria-pressed="true">打标</button>
+    <button id="tab-write" aria-pressed="false">自己出题</button>
+    <button id="tab-done" aria-pressed="false">交回结果</button>
+  </nav>
+</header>
+
+<section id="view-cards">
+  <div class="bar"><i id="bar"></i></div>
+  <div class="count" id="count"></div>
+  <div class="card" id="card"></div>
+  <div class="row">
+    <button id="prev">上一张</button>
+    <span class="grow hint">按数字键也能选，选完自动下一张。进度保存在这个浏览器里。</span>
+    <button id="next">下一张</button>
+  </div>
+</section>
+
+<section id="view-write" hidden>
+  <div class="card">
+    <p class="big">写一道你记得的旧事</p>
+    <p class="hint">人物已换成代号（如 P012）。问一件几周前聊过、答案明确的事，像在群里随口问一样，再搜出能证明答案的消息。</p>
+    <div class="label">问题</div><textarea id="w-q"></textarea>
+    <div class="label">答案</div><textarea id="w-a"></textarea>
+    <div class="label">搜聊天记录，点选能证明答案的消息</div>
+    <input type="search" id="w-s" placeholder="输入关键词">
+    <div id="w-hits"></div>
+    <div class="row"><button class="primary" id="w-add">保存这道题</button><span class="hint" id="w-n"></span></div>
+    <div class="status" id="w-status" role="status"></div>
+  </div>
+  <div id="w-list"></div>
+</section>
+
+<section id="view-done" hidden>
+  <div class="card">
+    <p class="big">把结果交回</p>
+    <p id="d-sum"></p>
+    <div class="label">你的名字或代号（只用于区分打标人）</div>
+    <input type="text" id="d-name">
+    <div class="row">
+      <button class="primary" id="d-dl">下载结果文件</button>
+      <button id="d-copy">复制结果文本</button>
+    </div>
+    <div class="status" id="d-status" role="status"></div>
+    <p class="hint">把文件或文本发给发起人。手机上下载不方便时用复制。结果里只有你的选择和你写的内容。</p>
+    <div class="label">换了设备或清过浏览器？可以导入之前交过的结果继续做</div>
+    <input type="file" id="d-import" accept="application/json,.json">
+  </div>
+  <div class="card">
+    <p class="hint">这份文件含真实群聊内容（已化名、遮蔽联系方式）。请勿转发，做完后可以删除。</p>
+  </div>
+</section>
+</main>
+
+<script id="data" type="application/json">/*DATA*/</script>
+<script>
+(function () {
+  var DATA = JSON.parse(document.getElementById('data').textContent);
+  var KEY = 'labels:' + DATA.pack;
+  var CHOICES = {
+    question: [['ok', '合格：答案对，证据够（像考题、琐碎也算）'], ['awkward', '合格，但问法别扭（可在备注改写）'], ['wrong', '答案不对'], ['weak', '证据不够，或者有歧义、可能有多个答案'], ['knowledge', '这更像梗或常识，不算回忆具体的事'], ['skip', '看不懂，跳过']],
+    answer: [['correct', '对'], ['partial', '部分对，或多了编造的内容'], ['incorrect', '错（含答「没有记录」）'], ['badquestion', '题目或标准答案本身有问题，没法判'], ['skip', '跳过']],
+    term: [['specific_ok', '这个群特有的说法，解释对'], ['specific_bad', '这个群特有的说法，解释错或不全'], ['general_ok', '圈内或网上通用的说法，解释对'], ['general_bad', '圈内或网上通用的说法，解释错或不全'], ['person', '人名或外号'], ['notterm', '不是梗（普通词、切错了）'], ['skip', '不了解，跳过']]
+  };
+  var NOTE_HINT = { question: '备注：更好的问法，或者为什么不行（可不填）', answer: '备注（可不填）', term: '备注：正确的意思（选了「解释错或不全」时请写）' };
+  var KIND = { question: '检查这道题', answer: '判断回答对不对', term: '这是这个群的说法吗' };
+  var state = { name: '', pos: 0, labels: {}, notes: {}, written: [] };
+
+  function load() {
+    try {
+      var saved = JSON.parse(localStorage.getItem(KEY) || 'null');
+      if (saved) state = Object.assign(state, saved);
+    } catch (e) { /* page still works, progress just is not remembered */ }
+  }
+  function save() {
+    try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) { /* see load */ }
+  }
+  function el(tag, cls, text) {
+    var n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text !== undefined) n.textContent = text;
+    return n;
+  }
+  function chat(lines) {
+    var box = el('div', 'chat');
+    lines.forEach(function (l) {
+      var row = el('div', l.gold ? 'gold' : (l.near ? 'near' : ''));
+      row.appendChild(el('span', 'who', l.who));
+      row.appendChild(document.createTextNode(l.text));
+      box.appendChild(row);
+    });
+    return box;
+  }
+  function field(card, label, value) {
+    card.appendChild(el('div', 'label', label));
+    card.appendChild(el('div', '', value));
+  }
+  function renderCard() {
+    var tasks = DATA.tasks, card = document.getElementById('card');
+    var done = tasks.filter(function (t) { return state.labels[t.id]; }).length;
+    document.getElementById('bar').style.width = (tasks.length ? 100 * done / tasks.length : 0) + '%';
+    document.getElementById('count').textContent = '已完成 ' + done + ' / ' + tasks.length + '，当前第 ' + (state.pos + 1) + ' 张';
+    card.textContent = '';
+    var t = tasks[state.pos];
+    if (!t) { card.appendChild(el('p', 'big', '都做完了，去「交回结果」。')); return; }
+    card.appendChild(el('div', 'kind', KIND[t.type]));
+    if (t.type === 'question') {
+      card.appendChild(el('p', 'big', t.question));
+      field(card, '答案', t.answer);
+      card.appendChild(el('div', 'label', '依据（高亮的是证据）'));
+      card.appendChild(chat(t.lines));
+    } else if (t.type === 'answer') {
+      card.appendChild(el('p', 'big', t.question));
+      field(card, '标准答案', t.answer);
+      field(card, '要判断的回答', t.model_answer);
+    } else {
+      card.appendChild(el('p', 'big', t.term));
+      field(card, '系统的解释', t.meaning);
+      if (t.usage) field(card, '用法', t.usage);
+      card.appendChild(el('div', 'label', '群里的例句'));
+      card.appendChild(chat(t.lines));
+    }
+    var box = el('div', 'choices');
+    CHOICES[t.type].forEach(function (c, i) {
+      var b = el('button', state.labels[t.id] === c[0] ? 'sel' : '');
+      b.appendChild(el('kbd', '', String(i + 1)));
+      b.appendChild(el('span', '', c[1]));
+      b.addEventListener('click', function () { choose(t, c[0]); });
+      box.appendChild(b);
+    });
+    card.appendChild(box);
+    card.appendChild(el('div', 'label', NOTE_HINT[t.type]));
+    var note = el('textarea');
+    note.value = state.notes[t.id] || '';
+    note.addEventListener('input', function () { state.notes[t.id] = note.value; save(); });
+    card.appendChild(note);
+  }
+  function choose(t, value) {
+    state.labels[t.id] = value;
+    move(1);
+  }
+  function move(d) {
+    state.pos = Math.max(0, Math.min(DATA.tasks.length, state.pos + d));
+    save();
+    renderCard();
+    window.scrollTo(0, 0);
+  }
+  var picked = [];
+  function renderHits() {
+    var q = document.getElementById('w-s').value.trim(), box = document.getElementById('w-hits');
+    box.textContent = '';
+    var shown = DATA.corpus.filter(function (m) { return picked.indexOf(m.n) >= 0; });
+    if (q) {
+      shown = shown.concat(DATA.corpus.filter(function (m) {
+        return m.text.indexOf(q) >= 0 && picked.indexOf(m.n) < 0;
+      }).slice(0, 30));
+    }
+    shown.forEach(function (m) {
+      var b = el('button', 'hit' + (picked.indexOf(m.n) >= 0 ? ' sel' : ''), m.day + ' ' + m.who + '：' + m.text);
+      b.addEventListener('click', function () {
+        var i = picked.indexOf(m.n);
+        if (i >= 0) picked.splice(i, 1); else picked.push(m.n);
+        renderHits();
+      });
+      box.appendChild(b);
+    });
+    document.getElementById('w-n').textContent = '已选 ' + picked.length + ' 条证据';
+  }
+  function renderWritten() {
+    var box = document.getElementById('w-list');
+    box.textContent = '';
+    state.written.forEach(function (w, i) {
+      var c = el('div', 'card');
+      c.appendChild(el('p', 'big', w.question));
+      c.appendChild(el('div', '', w.answer));
+      c.appendChild(el('div', 'hint', w.evidence.length + ' 条证据'));
+      var del = el('button', '', '删除');
+      del.addEventListener('click', function () { state.written.splice(i, 1); save(); renderWritten(); });
+      c.appendChild(del);
+      box.appendChild(c);
+    });
+  }
+  function result() {
+    return JSON.stringify({ pack: DATA.pack, name: state.name, labels: state.labels, notes: state.notes, written: state.written }, null, 1);
+  }
+  function status(id, text, bad) {
+    var s = document.getElementById(id);
+    s.textContent = text;
+    s.className = 'status' + (bad ? ' bad' : '');
+  }
+  function show(view) {
+    ['cards', 'write', 'done'].forEach(function (v) {
+      document.getElementById('view-' + v).hidden = v !== view;
+      document.getElementById('tab-' + v).setAttribute('aria-pressed', String(v === view));
+    });
+    if (view === 'done') {
+      var done = DATA.tasks.filter(function (t) { return state.labels[t.id]; }).length;
+      document.getElementById('d-sum').textContent = '完成 ' + done + ' / ' + DATA.tasks.length + ' 张，自己出了 ' + state.written.length + ' 道题。';
+      document.getElementById('d-name').value = state.name;
+    }
+  }
+  document.getElementById('prev').addEventListener('click', function () { move(-1); });
+  document.getElementById('next').addEventListener('click', function () { move(1); });
+  ['cards', 'write', 'done'].forEach(function (v) {
+    document.getElementById('tab-' + v).addEventListener('click', function () { show(v); });
+  });
+  document.addEventListener('keydown', function (e) {
+    if (document.getElementById('view-cards').hidden || /TEXTAREA|INPUT/.test(e.target.tagName)) return;
+    var t = DATA.tasks[state.pos];
+    if (!t) return;
+    var c = CHOICES[t.type][Number(e.key) - 1];
+    if (c) choose(t, c[0]);
+  });
+  document.getElementById('w-s').addEventListener('input', renderHits);
+  document.getElementById('w-add').addEventListener('click', function () {
+    var q = document.getElementById('w-q'), a = document.getElementById('w-a');
+    if (!q.value.trim() || !a.value.trim() || !picked.length) {
+      status('w-status', '问题、答案和至少一条证据都要有。', true);
+      return;
+    }
+    state.written.push({ question: q.value.trim(), answer: a.value.trim(), evidence: picked.slice() });
+    q.value = ''; a.value = ''; picked = [];
+    document.getElementById('w-s').value = '';
+    save(); renderHits(); renderWritten();
+    status('w-status', '已保存。');
+  });
+  document.getElementById('d-name').addEventListener('input', function (e) { state.name = e.target.value.trim(); save(); });
+  document.getElementById('d-dl').addEventListener('click', function () {
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([result()], { type: 'application/json' }));
+    a.download = 'labels-' + DATA.pack + (state.name ? '-' + state.name : '') + '.json';
+    document.body.appendChild(a); a.click(); a.remove();
+    status('d-status', '已开始下载。');
+  });
+  document.getElementById('d-copy').addEventListener('click', function () {
+    var text = result();
+    var fallback = function () {
+      var t = el('textarea'); t.value = text; document.body.appendChild(t); t.select();
+      var ok = false;
+      try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+      t.remove();
+      status('d-status', ok ? '已复制。' : '复制失败，请用下载。', !ok);
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(function () { status('d-status', '已复制。'); }, fallback);
+    } else { fallback(); }
+  });
+  document.getElementById('d-import').addEventListener('change', function (e) {
+    var file = e.target.files[0];
+    if (!file) return;
+    file.text().then(function (text) {
+      var r = JSON.parse(text);
+      if (r.pack !== DATA.pack) throw new Error('pack');
+      state.name = r.name || ''; state.labels = r.labels || {}; state.notes = r.notes || {}; state.written = r.written || [];
+      var first = DATA.tasks.findIndex(function (t) { return !state.labels[t.id]; });
+      state.pos = first < 0 ? DATA.tasks.length : first;
+      save(); renderCard(); renderWritten(); show('done');
+      status('d-status', '已导入。');
+    }).catch(function () { status('d-status', '这个文件不属于这份打标任务。', true); });
+  });
+  load();
+  renderCard(); renderHits(); renderWritten();
+})();
+</script>
+</body>
+</html>

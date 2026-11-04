@@ -1,5 +1,7 @@
 # Linux VPS 部署总览
 
+> **已不是当前路线（D-021）**：现在的目标是常驻 Windows PC + SnowLuma，见 [docs/transfer-to-new-machine.md](../../docs/transfer-to-new-machine.md)。本目录（含 `native/`、`docker-compose.yml`）仍是 NapCat 方案，仅作历史参考，且依赖的 `NAPCAT_*` 变量已从 `.env.example` 移除。
+
 ## 当前选择：原生 systemd（不使用 Docker）
 
 原因：目标 VPS 内存/磁盘紧张且会跑编译，Docker 守护进程与镜像占用不可接受。

@@ -1,5 +1,11 @@
 # Start AstrBot on Windows from the repo root, loading .env for provider keys.
-# Usage: pwsh -File deploy/windows/start-astrbot.ps1
+# Usage:
+#   pwsh -File deploy/windows/start-astrbot.ps1
+#   pwsh -File deploy/windows/start-astrbot.ps1 -KeepAlive
+param(
+    [switch]$KeepAlive
+)
+
 $ErrorActionPreference = 'Stop'
 
 $repo = Resolve-Path (Join-Path $PSScriptRoot '..\..')
@@ -21,4 +27,10 @@ if (Test-Path $envFile) {
 $env:PYTHONIOENCODING = 'utf-8'
 chcp 65001 > $null
 
-astrbot run
+do {
+    astrbot run
+    if ($KeepAlive) {
+        Write-Host "AstrBot exited with code $LASTEXITCODE, restarting in 5s"
+        Start-Sleep -Seconds 5
+    }
+} while ($KeepAlive)
