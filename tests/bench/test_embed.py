@@ -84,3 +84,13 @@ def test_aliyun_settings_are_part_of_the_cache_key(tmp_path):
     assert len(keys) == 3
     # The instruction only goes with queries, so documents share vectors across instructions.
     assert asym._key("文", "RETRIEVAL_DOCUMENT") == inst._key("文", "RETRIEVAL_DOCUMENT")
+
+
+def test_frozen_config_matches_the_tested_v2_and_m1():
+    from bench.frozen import ALTERNATIVE, FROZEN, LEGACY
+    from bench.run_embed_ablation import CONFIGS
+
+    for config, name in ((FROZEN, "V2"), (ALTERNATIVE, "M1"), (LEGACY, "V0")):
+        e, c = config["embedding"], CONFIGS[name]
+        assert (e["model"], e["dim"], e["asymmetric"], e["instruct"]) == (c["model"], c["dim"], c["asymmetric"], c["instruct"])
+    assert FROZEN["top_k"] == 5 and FROZEN["budget_chars"] == 1500

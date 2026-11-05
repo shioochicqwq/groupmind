@@ -29,7 +29,7 @@ from bench.run_vector import EMBED_CHARS
 from bench.schema import Visibility
 from bench.tasks import silver
 
-INSTRUCT = "给定群聊里的一个问题，检索能回答这个问题的聊天记录"
+from bench.frozen import INSTRUCT  # noqa: E402  (one source for the frozen instruction)
 CONFIGS = {
     "V0": dict(model="qwen3.7-text-embedding-flash", dim=768, asymmetric=False, instruct="", raw="alias"),
     "V1": dict(model="qwen3.7-text-embedding-flash", dim=768, asymmetric=True, instruct="", raw="alias"),
