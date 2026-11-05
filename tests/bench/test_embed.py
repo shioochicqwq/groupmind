@@ -94,3 +94,9 @@ def test_frozen_config_matches_the_tested_v2_and_m1():
         e, c = config["embedding"], CONFIGS[name]
         assert (e["model"], e["dim"], e["asymmetric"], e["instruct"]) == (c["model"], c["dim"], c["asymmetric"], c["instruct"])
     assert FROZEN["top_k"] == 5 and FROZEN["budget_chars"] == 1500
+
+
+def test_frozen_records_overlap_dedup():
+    from bench.frozen import FROZEN, LEGACY
+
+    assert FROZEN["overlap_dedup"] == "index+route" and LEGACY["overlap_dedup"] == "none"

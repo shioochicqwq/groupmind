@@ -35,6 +35,16 @@ def arm_name(config: str) -> str:
     return f"K5{config}:rrf4@{BUDGET}"
 
 
+def baseline_rows(out: Path, baseline: str) -> list[dict]:
+    """Rows (id, visible, answer, correct, ...) of the comparison arm, rebuilt from its raw records."""
+    rows = []
+    for r in map(json.loads, (out / baseline).open(encoding="utf-8")):
+        row = {"id": r["question_id"], "visible": r["visible"], "answer": r["final_answer"], "gold_injected": r.get("gold_injected")}
+        row["correct" if r["visible"] else "refused"] = r.get("correct" if r["visible"] else "refused")
+        rows.append(row)
+    return rows
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--group", required=True)
@@ -45,6 +55,9 @@ def main() -> int:
     ap.add_argument("--workers", type=int, default=8)
     ap.add_argument("--configs", nargs="+", default=["V2", "M1"])
     ap.add_argument("--scan-only", action="store_true")
+    ap.add_argument("--colors-file", default="", help="another colour file, e.g. the merged-v1 fix")
+    ap.add_argument("--experiment", default="embed_qa", help="name of the result file, raw folder and ledger section")
+    ap.add_argument("--baseline", default="raw/depth/K5_rrf4_at1500.jsonl", help="records of the arm to compare with")
     args = ap.parse_args()
     args.budget = BUDGET
     if realdata.splits()[args.group] is not Visibility.DEV:
@@ -63,7 +76,8 @@ def main() -> int:
         c = CONFIGS[name]
         cache = args.out / f"embed.ablation.{c['model']}.{c['dim']}.cache.jsonl"
         emb = AliyunEmbedder(cache, c["model"], c["dim"], c["asymmetric"], c["instruct"])
-        emb._request = offline
+        if not args.colors_file:
+            emb._request = offline  # new colours need new vectors; the original ones are all cached
         vs = VectorIndex(ctx.summary_blocks, emb, f"向量|{name}|摘要")
         vr = VectorIndex([x.__class__(x.block_id, x.msg_ids, x.end_ts, x.channel, raw_text(x, by_id, ctx.summary_of, c["raw"]), x.labels)
                           for x in ctx.raw_color_blocks], emb, f"向量|{name}|原文块")
@@ -81,7 +95,7 @@ def main() -> int:
         (q, q["first_ts"], False) for q in questions if q["id"] in absent_ids]
 
     # Baseline: the frozen version's records from the depth run.
-    base_file = args.out / "raw" / "depth" / "K5_rrf4_at1500.jsonl"
+    base_file = args.out / args.baseline
     base = {(r["question_id"], r["visible"]): r for r in map(json.loads, base_file.open(encoding="utf-8"))}
     main_llm = ctx.main_llm
     scan, inputs = {}, {}
@@ -97,37 +111,40 @@ def main() -> int:
             "new_needed": len({k for k in keys if k not in main_llm.cache}),
             "gold_injected": round(sum(gold_in[i] for i in vis) / len(vis), 4),
             "frozen_gold_injected": round(sum(base[(conditions[i][0]["id"], True)]["gold_injected"] for i in vis) / len(vis), 4),
+            "per_question": {conditions[i][0]["id"]: [bool(base[(conditions[i][0]["id"], True)]["gold_injected"]), gold_in[i]] for i in vis},
         }
         print(arm.name, scan[arm.name], flush=True)
-    report = {"group": args.group, "scan": scan, "arms": {}, "instruct": INSTRUCT}
-    (args.out / "embed_qa.json").write_text(json.dumps(report, ensure_ascii=False, indent=1), encoding="utf-8")
+    report = {"group": args.group, "scan": scan, "arms": {}, "instruct": INSTRUCT, "colors_file": args.colors_file or "original",
+              "baseline": args.baseline}
+    (args.out / f"{args.experiment}.json").write_text(json.dumps(report, ensure_ascii=False, indent=1), encoding="utf-8")
     if args.scan_only:
         return 0
 
     usage.reset()
     llms = (ctx.fast_llm, main_llm, ctx.judge_llm)
-    frozen_rows = json.loads((args.out / "depth.json").read_text(encoding="utf-8"))["arms"][BASE]["rows"]
+    frozen_rows = baseline_rows(args.out, args.baseline)
     for name, arm in arms.items():
         c = CONFIGS[name]
-        result = evaluate_arm(arm, conditions, llms, ctx.awkward, rawlog.arm_file(args.out, "embed_qa", arm.name))
+        result = evaluate_arm(arm, conditions, llms, ctx.awkward, rawlog.arm_file(args.out, args.experiment, arm.name))
         result["conditions"] = cond(
-            index=f"四路（关键词两路 + 向量两路），每路前 {K}，全局 RRF，严格按名次打包；向量 {name}", chunking="颜色块",
+            index=f"四路（关键词两路 + 向量两路），每路前 {K}，全局 RRF，严格按名次打包；向量 {name}",
+            chunking="颜色块（重叠去重合并 merged-v1，与此前实验条件不同）" if args.colors_file else "颜色块",
             tokenizer=f"jieba+习得词 + {c['model']}（{c['dim']} 维，text_type 区分查询/文档，查询带指令）",
             top_k=K, filter="否", feed="原文块（去重）", budget_chars=BUDGET, model_main=DEFAULT_MODEL, judge=JUDGE_MODEL, seed=0)
         result.update(scoring.three_state(result["rows"]))
         result["vs_frozen"] = scoring.paired(frozen_rows, result["rows"])
         report["arms"][arm.name] = result
         print(arm.name, {k: v for k, v in result.items() if k not in ("rows", "conditions")}, flush=True)
-        (args.out / "embed_qa.json").write_text(json.dumps(report, ensure_ascii=False, indent=1), encoding="utf-8")
+        (args.out / f"{args.experiment}.json").write_text(json.dumps(report, ensure_ascii=False, indent=1), encoding="utf-8")
     if len(arms) == 2:
         a, b = (report["arms"][arm_name(n)]["rows"] for n in args.configs)
         report["M1_vs_V2"] = scoring.paired(a, b)
     report["cost"] = usage.summary()
-    (args.out / "embed_qa.json").write_text(json.dumps(report, ensure_ascii=False, indent=1), encoding="utf-8")
-    usage.write(args.out / "usage.embed_qa.json", "I5 向量配置（问答层）")
+    (args.out / f"{args.experiment}.json").write_text(json.dumps(report, ensure_ascii=False, indent=1), encoding="utf-8")
+    usage.write(args.out / f"usage.{args.experiment}.json", args.experiment)
     from bench.ledger_backfill import abcd
 
-    ledger.append(args.out.parent / "ledger.jsonl", abcd(args.out.parent, args.out.name, "embed_qa"))
+    ledger.append(args.out.parent / "ledger.jsonl", abcd(args.out.parent, args.out.name, args.experiment))
     print("done")
     return 0
 

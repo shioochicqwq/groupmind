@@ -59,7 +59,7 @@ def cost_rows(folder: Path, split: str) -> list[dict]:
                         tokens={"上色": color}, when=_when(folder / "color.gemini-3.8-flash-high.cache.jsonl"),
                         raw=raw_ref(folder.parent, folder / "colors.gemini-3.8-flash-high.jsonl")))
     for name, title in (("questions", "出题和核题"), ("s0", "Q2 第一轮"), ("abcd", "主实验"), ("k", "梗表"),
-                        ("vector", "向量检索"), ("packing", "打包与保底"), ("depth", "候选深度"), ("embed_qa", "向量配置问答")):
+                        ("vector", "向量检索"), ("packing", "打包与保底"), ("depth", "候选深度"), ("embed_qa", "向量配置问答"), ("color_fix", "上色修正")):
         own = shared(usage_of(folder, name))
         if own:
             rows.append(row(f"成本：{title}的共享调用（{split}）", "共享", cond(model_main=GEMINI), {}, dataset="QQ",
@@ -277,7 +277,8 @@ def abcd(runs: Path, folder: str = "real-dev", name: str = "abcd") -> list[dict]
     abcd_usage = usage_of(runs / folder, name)
     title = {"abcd": "R4/I3 检索对象 × 交给模型", "vector": "I4 向量检索（1500 字）", "packing": "E 打包与保底（1500 字）",
              "depth": "K 候选深度（E1，1500 字）",
-             "embed_qa": "I5 向量配置（问答层，冻结版框架）"}[name]
+             "embed_qa": "I5 向量配置（问答层，冻结版框架）",
+             "color_fix": "C 上色修正 merged-v1（冻结版 V2；与此前实验条件不同）"}[name]
     for arm_name, a in r["arms"].items():
         from bench.run_abcd import arm_conditions
 
@@ -296,5 +297,5 @@ def abcd(runs: Path, folder: str = "real-dev", name: str = "abcd") -> list[dict]
 def backfill(runs: Path) -> list[dict]:
     labels = runs.parent / "labels" / "round1" / "merged.json"
     costs = cost_rows(runs / "real-dev", "DEV-1") + cost_rows(runs / "real-dev2", "DEV-2")
-    tables = [abcd(runs, f, n) for f in ("real-dev", "real-dev2") for n in ("abcd", "vector", "packing", "depth", "embed_qa")]
+    tables = [abcd(runs, f, n) for f in ("real-dev", "real-dev2") for n in ("abcd", "vector", "packing", "depth", "embed_qa", "color_fix")]
     return gmb(runs) + q1(runs) + q2(runs, labels) + k(runs) + sum(tables, []) + costs

@@ -144,7 +144,8 @@ def prepare(args) -> SimpleNamespace:
         if not re.search(r"P\d", w)
     )
     tok = tokenize.make_jieba(learned)
-    colors = [json.loads(x) for x in (args.out / "colors.gemini-3.8-flash-high.jsonl").read_text(encoding="utf-8").splitlines()]
+    colors_file = getattr(args, "colors_file", "") or "colors.gemini-3.8-flash-high.jsonl"
+    colors = [json.loads(x) for x in (args.out / colors_file).read_text(encoding="utf-8").splitlines()]
     summary_blocks = chunking.from_colors(messages, colors, "summary")
     raw_color_blocks = chunking.from_colors(messages, colors, "raw")
     by_color = {b.block_id: b for b in raw_color_blocks}
