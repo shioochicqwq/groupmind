@@ -560,3 +560,5 @@
 - **未决**：
   - 「圈子通用」（同一批成员的几个群共用，但不是全网通用）要不要再单独一层，先归入通用层，看打标结果再定。
   - 通用层的含义可以借助模型本身的常识，本群层不行，两层的入表门槛可能要分开设。
+
+> **D-032 补记（2026-11-06）：B 正式接入主管线。** 此前 B 只在离线实验脚本里实现，冻结配置虽写着 `index+route`，问答脚本实际仍按 A 运行。现在冻结版检索收进 `bench/retrievers/frozen_pipeline.py`，`run_embed_qa` 默认用 B，`--overlap none` 复现旧实验。回归检查（`bench/check_frozen_pipeline.py`）在两个 DEV 群上逐题复现了 V2、V0 的历史注入和离线实验的 A、B。B 的问答层仍未测。说明见 `docs/memory-frozen-pipeline.md`。

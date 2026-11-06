@@ -1,7 +1,8 @@
 """Does a better embedding turn into accuracy? Answer-level test of V2 and M1. DEV only.
 
 The frozen version (four routes, top 5 per route, global RRF, strict packing into 1500
-characters, raw blocks, no filter) stays as it is; only the two vector routes change:
+characters, raw blocks, no filter) comes from bench.retrievers.frozen_pipeline; overlap handling
+is B by default (--overlap none reproduces the runs before 2026-11-05). Only the vector routes change:
 
   V2  qwen3.7-text-embedding-flash with text_type document/query and a retrieval instruction
   M1  the same settings on qwen3.7-text-embedding
@@ -18,21 +19,23 @@ import random
 from pathlib import Path
 
 from bench import ledger, rawlog, realdata, scoring, usage
-from bench.embed import AliyunEmbedder, VectorIndex
+from bench.embed import AliyunEmbedder
 from bench.ledger import cond
 from bench.llm import DEFAULT_MODEL, JUDGE_MODEL
-from bench.memory_text import raw_blocks
-from bench.retrievers import packing
+from bench import coloring
+from bench.frozen import FROZEN
+from bench.retrievers import frozen_pipeline
+from bench.tasks.real_tasks import clean_messages
 from bench.run_abcd import ANSWER, Arm, build_inputs, evaluate_arm, prepare
-from bench.run_embed_ablation import CONFIGS, INSTRUCT, raw_text
+from bench.run_embed_ablation import CONFIGS, INSTRUCT
 from bench.schema import Visibility
 
 K, BUDGET, DEPTH = 5, 1500, 30
 BASE = "K5:rrf4@1500"
 
 
-def arm_name(config: str) -> str:
-    return f"K5{config}:rrf4@{BUDGET}"
+def arm_name(config: str, overlap: str = "none") -> str:
+    return f"K5{config}{'' if overlap == 'none' else 'B'}:rrf4@{BUDGET}"
 
 
 def baseline_rows(out: Path, baseline: str) -> list[dict]:
@@ -56,6 +59,8 @@ def main() -> int:
     ap.add_argument("--configs", nargs="+", default=["V2", "M1"])
     ap.add_argument("--scan-only", action="store_true")
     ap.add_argument("--colors-file", default="", help="another colour file, e.g. the merged-v1 fix")
+    ap.add_argument("--overlap", choices=frozen_pipeline.MODES, default=FROZEN["overlap_dedup"],
+                    help="overlap handling (D-032); 'none' reproduces runs before 2026-11-05")
     ap.add_argument("--experiment", default="embed_qa", help="name of the result file, raw folder and ledger section")
     ap.add_argument("--baseline", default="raw/depth/K5_rrf4_at1500.jsonl", help="records of the arm to compare with")
     args = ap.parse_args()
@@ -63,14 +68,16 @@ def main() -> int:
     if realdata.splits()[args.group] is not Visibility.DEV:
         raise SystemExit("this run sends data out and is DEV only")
 
+    if args.colors_file and args.overlap != "none":
+        raise SystemExit("--colors-file colours are not batch colours; use --overlap none with them")
     ctx = prepare(args)
-    by_id, channel = ctx.by_id, ctx.channel
-    feed = lambda bs: raw_blocks(bs, by_id)  # noqa: E731
-    keyword = [ctx.summary_index, ctx.raw_index]
 
     def offline(*_a, **_k):
         raise RuntimeError("embedding cache miss: this run must not call the embedding API")
 
+    colors_file = args.colors_file or FROZEN["colors"]
+    colors = [json.loads(x) for x in (args.out / colors_file).open(encoding="utf-8")]
+    batches = coloring.batches(clean_messages(realdata.load_group(args.group)), 150, 20)
     arms = {}
     for name in args.configs:
         c = CONFIGS[name]
@@ -78,16 +85,9 @@ def main() -> int:
         emb = AliyunEmbedder(cache, c["model"], c["dim"], c["asymmetric"], c["instruct"])
         if not args.colors_file:
             emb._request = offline  # new colours need new vectors; the original ones are all cached
-        vs = VectorIndex(ctx.summary_blocks, emb, f"向量|{name}|摘要")
-        vr = VectorIndex([x.__class__(x.block_id, x.msg_ids, x.end_ts, x.channel, raw_text(x, by_id, ctx.summary_of, c["raw"]), x.labels)
-                          for x in ctx.raw_color_blocks], emb, f"向量|{name}|原文块")
-        indexes = keyword + [vs, vr]
-
-        def retrieve(q, t, indexes=indexes):
-            routes = [[ctx.by_color[x.block_id] for x, _ in idx.search(q, t, K, channel)] for idx in indexes]
-            return packing.pack_in_order(packing.global_rrf(routes), feed, BUDGET)
-
-        arms[name] = Arm(arm_name(name), retrieve, None, feed, BUDGET)
+        config = {**FROZEN, "overlap_dedup": args.overlap, "embedding": {**FROZEN["embedding"], "raw_mode": c["raw"]}}
+        r, _ = frozen_pipeline.build(ctx, config, emb, colors, batches)
+        arms[name] = Arm(arm_name(name, args.overlap), r.retrieve, None, r.feed, BUDGET)
 
     questions = ctx.questions
     absent_ids = {q["id"] for q in random.Random(0).sample(questions, min(args.absent, len(questions)))}
@@ -128,7 +128,8 @@ def main() -> int:
         result = evaluate_arm(arm, conditions, llms, ctx.awkward, rawlog.arm_file(args.out, args.experiment, arm.name))
         result["conditions"] = cond(
             index=f"四路（关键词两路 + 向量两路），每路前 {K}，全局 RRF，严格按名次打包；向量 {name}",
-            chunking="颜色块（重叠去重合并 merged-v1，与此前实验条件不同）" if args.colors_file else "颜色块",
+            chunking=("颜色块（重叠去重合并 merged-v1，与此前实验条件不同）" if args.colors_file else
+                      "颜色块（重叠去重不合并 B，D-032，与此前实验条件不同）" if args.overlap != "none" else "颜色块"),
             tokenizer=f"jieba+习得词 + {c['model']}（{c['dim']} 维，text_type 区分查询/文档，查询带指令）",
             top_k=K, filter="否", feed="原文块（去重）", budget_chars=BUDGET, model_main=DEFAULT_MODEL, judge=JUDGE_MODEL, seed=0)
         result.update(scoring.three_state(result["rows"]))
@@ -137,7 +138,7 @@ def main() -> int:
         print(arm.name, {k: v for k, v in result.items() if k not in ("rows", "conditions")}, flush=True)
         (args.out / f"{args.experiment}.json").write_text(json.dumps(report, ensure_ascii=False, indent=1), encoding="utf-8")
     if len(arms) == 2:
-        a, b = (report["arms"][arm_name(n)]["rows"] for n in args.configs)
+        a, b = (report["arms"][arm_name(n, args.overlap)]["rows"] for n in args.configs)
         report["M1_vs_V2"] = scoring.paired(a, b)
     report["cost"] = usage.summary()
     (args.out / f"{args.experiment}.json").write_text(json.dumps(report, ensure_ascii=False, indent=1), encoding="utf-8")

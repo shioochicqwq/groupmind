@@ -96,10 +96,11 @@ def arm_conditions(name: str) -> dict:
 
 def depth_index(base: str) -> tuple[str, str, str]:
     """K<n>:rrf4 arms of the depth experiment: E1 with n candidates per route."""
-    m = re.fullmatch(r"K(\d+)([VM]\d)?:rrf4", base)
+    m = re.fullmatch(r"K(\d+)([VM]\d)?(B)?:rrf4", base)
     if not m:
         raise KeyError(base)
     vec = f"；向量 {m.group(2)}" if m.group(2) else ""
+    vec += "；重叠去重不合并 B（D-032，与此前实验条件不同）" if m.group(3) else ""
     return (f"四路（关键词 + 向量）每路前 {m.group(1)}，全局 RRF，严格按名次打包{vec}", "-", "原文块（去重）")
 
 

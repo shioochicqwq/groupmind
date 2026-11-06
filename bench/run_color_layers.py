@@ -28,6 +28,7 @@ from bench.embed import VectorIndex
 from bench.frozen import FROZEN, embedder
 from bench.memory_text import raw_blocks
 from bench.retrievers import packing
+from bench.retrievers.frozen_pipeline import skip_covered  # noqa: F401  (kept importable from here)
 from bench.retrievers.bm25 import BM25
 from bench.run_abcd import prepare
 from bench.run_embed_ablation import raw_text
@@ -36,21 +37,6 @@ from bench import coloring
 from bench.tasks.real_tasks import clean_messages
 
 K, DEPTH, BUDGET, RRF_K = FROZEN["top_k"], 30, FROZEN["budget_chars"], FROZEN["rrf_k"]
-
-
-def skip_covered(route: list, k: int) -> list:
-    """B-route: drop a block only when every one of its messages is already in a higher block."""
-    seen: set[str] = set()
-    out = []
-    for b in route:
-        ids = set(b.msg_ids)
-        if ids and ids <= seen:
-            continue
-        out.append(b)
-        seen |= ids
-        if len(out) == k:
-            break
-    return out
 
 
 def vec_raw_blocks(blocks, by_id, summary_of):
