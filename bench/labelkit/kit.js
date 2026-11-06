@@ -9,6 +9,7 @@
  * Question schema for queue:
  *   {key, title, options: [[value, label], ...], required: true}
  *   {key, title, type: 'text', placeholder, showWhen(answers), requiredWhen(answers)}
+ *   {key, title, options, multi: true, required: false}   several choices; never auto-advances
  * A card is complete when every required question is answered and every required text is filled.
  * Clicking the last missing option moves on by itself; when a text box is showing, the page waits
  * for "下一题" (or Enter) so the text can be written.
@@ -56,7 +57,12 @@
 
   function visible(q, a) { return !q.showWhen || q.showWhen(a); }
   function needed(q, a) { return visible(q, a) && (q.type === 'text' ? !!(q.requiredWhen && q.requiredWhen(a)) : q.required !== false); }
-  function answered(q, a) { var v = a[q.key]; return q.type === 'text' ? !!(v && String(v).trim()) : v != null && v !== ''; }
+  function answered(q, a) {
+    var v = a[q.key];
+    if (q.type === 'text') return !!(v && String(v).trim());
+    if (q.multi) return Array.isArray(v) && v.length > 0;
+    return v != null && v !== '';
+  }
   LK.complete = function (questions, a) { return questions.every(function (q) { return !needed(q, a) || answered(q, a); }); };
 
   LK.queue = function (root, opts) {
@@ -115,19 +121,32 @@
           var row = el('div', 'lk-opts');
           q.options.forEach(function (o) {
             var b = el('button', 'lk-opt', o[1]); b.type = 'button';
-            b.setAttribute('aria-pressed', a[q.key] === o[0] ? 'true' : 'false');
+            var on = function () { return q.multi ? (a[q.key] || []).indexOf(o[0]) >= 0 : a[q.key] === o[0]; };
+            b.setAttribute('aria-pressed', on() ? 'true' : 'false');
+            if (q.multi) {
+              b.onclick = function () {
+                var v = (a[q.key] || []).slice(), k = v.indexOf(o[0]);
+                if (k >= 0) v.splice(k, 1); else v.push(o[0]);
+                a[q.key] = v; save(); b.setAttribute('aria-pressed', on() ? 'true' : 'false'); sync();
+              };
+              row.appendChild(b);
+              return;
+            }
             b.onclick = function () {
               a[q.key] = o[0]; save();
               row.querySelectorAll('.lk-opt').forEach(function (x) { x.setAttribute('aria-pressed', 'false'); });
               b.setAttribute('aria-pressed', 'true');
               sync();
-              var textShowing = texts.some(function (x) { return visible(x.q, a); });
+              // A visible text box or multi-choice question means the card waits for "下一题".
+              var textShowing = texts.some(function (x) { return visible(x.q, a); }) ||
+                qs.some(function (x) { return x.multi && visible(x, a); });
               if (LK.complete(qs, a) && !textShowing) setTimeout(function () { if (idx === i) go(i + 1); }, 260);
               else { var need = texts.find(function (x) { return needed(x.q, a) && !answered(x.q, a); }); if (need) need.inp.focus(); }
             };
             row.appendChild(b);
           });
-          if (q.required !== false) t.appendChild(el('span', 'req', '必选'));
+          if (q.required !== false) t.appendChild(el('span', 'req', q.multi ? '必选，可多选' : '必选'));
+          else if (q.multi) t.appendChild(el('span', 'req', '可多选，可不选'));
           wrap.appendChild(row);
         }
         box.appendChild(wrap);

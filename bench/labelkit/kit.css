@@ -64,3 +64,10 @@ textarea{min-height:44px;resize:vertical}
 .lk-graph line.maybe{stroke:var(--warn);stroke-dasharray:4 3}
 .lk-graph line.no{stroke:var(--bad);stroke-dasharray:2 3}
 .lk-graph .al{fill:var(--acc)}
+/* long message lists */
+.lk-scroll{max-height:420px;overflow:auto;border:1px solid var(--line);border-radius:10px;background:var(--card);padding:6px 8px;margin:6px 0;font-size:13px;line-height:1.5}
+.lk-line{border-left:4px solid transparent;padding:1px 0 1px 6px;word-break:break-word}
+.lk-line .tm{color:var(--mut);font-variant-numeric:tabular-nums;margin-right:6px}
+.lk-seg{border-left:4px solid var(--line);padding:4px 0 4px 8px;margin:4px 0}
+.lk-seg summary{cursor:pointer;font-size:14px}
+select{margin:4px 0}
