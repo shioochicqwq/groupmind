@@ -561,6 +561,8 @@
   - 「圈子通用」（同一批成员的几个群共用，但不是全网通用）要不要再单独一层，先归入通用层，看打标结果再定。
   - 通用层的含义可以借助模型本身的常识，本群层不行，两层的入表门槛可能要分开设。
 
+> **D-032 补记（2026-11-06）：B 正式接入主管线。** 此前 B 只在离线实验脚本里实现，冻结配置虽写着 `index+route`，问答脚本实际仍按 A 运行。现在冻结版检索收进 `bench/retrievers/frozen_pipeline.py`，`run_embed_qa` 默认用 B，`--overlap none` 复现旧实验。回归检查（`bench/check_frozen_pipeline.py`）在两个 DEV 群上逐题复现了 V2、V0 的历史注入和离线实验的 A、B。B 的问答层仍未测。说明见 `docs/memory-frozen-pipeline.md`。
+
 ## D-034 模型分工：视频用 Gemini，其他模型工作用 DeepSeek（用户决定，2026-11-07）
 
 - **做法**：视频理解（Bilibili-Video-Research）用 Gemini 服务商，模型设 `GEMINI_VIDEO_MODEL=gemini-3-flash-preview`（BVR 默认的 `gemini-2.5-flash` 已停用）；其余批量模型工作（回答、写词条、事件问答、网页读取评测等）改用 DeepSeek。始终不用 Claude 模型做批量任务（D-024 起）。
