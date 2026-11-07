@@ -23,8 +23,8 @@ import urllib.request
 from pathlib import Path
 from urllib.parse import urldefrag, urlsplit
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "plugins" / "astrbot_plugin_web_reader"))
-import reader  # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import backends  # noqa: E402
 
 HERE = Path(__file__).parent
 SYSTEM = """你可以用工具 web_read 读取网页：它返回标题、正文（分段，more=true 时用 offset 续读）和页面上的链接。
@@ -37,20 +37,17 @@ TOOL = {"type": "function", "function": {
 
 
 def norm(s: str) -> str:
+    """Whitespace collapsed, Markdown emphasis and code marks and backslash escapes removed, lower case."""
+    s = re.sub(r"!?\[([^\]]*)\]\([^)]*\)", r"\1", s)   # Markdown links and images -> their text
+    s = re.sub(r"[*`_\\#]", "", s)
     return re.sub(r"\s+", " ", s).replace(" .", ".").replace(" ,", ",").strip().lower()
 
 
+BACKEND = "web_reader"
+
+
 def read(url: str, offset: int = 0) -> dict:
-    try:
-        final, _ctype, body = reader.fetch(url)
-        d = reader.extract(body, final, offset=offset)
-        return {"ok": True, **d}
-    except reader.BlockedURL as e:
-        return {"ok": False, "error": f"blocked: {e}"}
-    except reader.FetchError as e:
-        return {"ok": False, "error": str(e)}
-    except Exception as e:  # noqa: BLE001
-        return {"ok": False, "error": f"{type(e).__name__}: {e}"}
+    return backends.read(BACKEND, url, offset)
 
 
 def full_text(url: str) -> tuple[str, list, str | None]:
@@ -121,7 +118,7 @@ def run_model(case: dict, endpoint: str, key: str, model: str, max_steps: int) -
             if d["ok"]:
                 read_texts.append(d["text"])
                 payload = {k: d[k] for k in ("url", "title", "start", "end", "more", "text")}
-                payload["links"] = [f"{label} | {href}" for label, href in d["links"]]
+                payload["links"] = [f"{label[:60]} | {href}" for label, href in d["links"]]
             else:
                 payload = {"error": d["error"]}
             messages.append({"role": "tool", "tool_call_id": c["id"], "content": json.dumps(payload, ensure_ascii=False)})
@@ -148,7 +145,10 @@ def main() -> int:
     ap.add_argument("--model", default="deepseek-chat")
     ap.add_argument("--key-file", type=Path)
     ap.add_argument("--max-steps", type=int, default=8)
+    ap.add_argument("--backend", choices=sorted(backends.BACKENDS), default="web_reader")
     args = ap.parse_args()
+    global BACKEND
+    BACKEND = args.backend
     cases = json.loads(args.cases.read_text(encoding="utf-8"))
     key = args.key_file.read_text(encoding="utf-8").strip() if args.key_file else ""
     if args.mode == "model" and not key:
@@ -160,7 +160,7 @@ def main() -> int:
         rows.append({"id": c["id"], "kind": c["kind"], "sec": round(time.time() - t, 1), **r})
         print(json.dumps({k: v for k, v in rows[-1].items() if k != "trace"}, ensure_ascii=False), flush=True)
     args.out.parent.mkdir(parents=True, exist_ok=True)
-    args.out.write_text(json.dumps({"mode": args.mode, "model": args.model if args.mode == "model" else None,
+    args.out.write_text(json.dumps({"mode": args.mode, "backend": args.backend, "model": args.model if args.mode == "model" else None,
                                     "when": time.strftime("%Y-%m-%d %H:%M"), "rows": rows}, ensure_ascii=False, indent=1), encoding="utf-8")
     return 0
 
