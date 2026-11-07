@@ -104,3 +104,30 @@ B 站公开接口（T0，不登录，普通请求头）：`x/web-interface/view`
 **找到的原因**：`web_reader` 只返回 HTML 里**按出现顺序的前 60 个链接**（`MAX_LINKS = 60`），而且不能翻页。GitHub、文档站的页面一开头就是导航栏、菜单和侧边栏，正文里的链接排在后面，于是被截掉。这就是「读得到首页、点不进去」的原因：模型拿不到通往目标页的链接，只能猜网址或者放弃。直接给出页面时读取本身没有问题。
 
 **下一步**：用 DeepSeek 跑模型版（同一批题），量出模型实际能拿回多少原文、会不会编造；然后改 `web_reader` 的链接返回方式（例如链接分页、按正文区域优先、按关键词过滤），用同一批题再测一次。需要用户提供 DeepSeek 密钥（建议放在 `qqbot-data/tools/deepseek.key`）。
+
+## 8. 更新（2026-11-07）：视频链路冒烟、现成网页读取项目比较
+
+**视频（BVR + Gemini）**，用户已批准安装运行：
+
+- `npm ci` 需要 `python` 命令（yt-dlp-exec 的安装前检查）；本机只有 `python3`，安装时临时加了一个指向它的 `python`。ffmpeg、yt-dlp 2026.10.26 就位；自带测试 25 + 18 项全部通过；MCP stdio 连通，三个工具都在。
+- 公开视频（`BV17x411w7KC`）：元数据、标签、评论都拿到了。BVR 用的是非浏览器 UA（`bilibili-video-research-mcp/0.1`），而我们之前用伪装浏览器又不带 cookie 的请求才被 412。视频下载（yt-dlp）在本容器失败（HTTP 错误），该视频又没有字幕，所以分析结果如实标为 `unavailable`，失败原因写在输出里。
+- 画面模态：用 ffmpeg 合成一段 6 秒视频（第 3 秒右上角出现绿色方块），经 `analyze_video` 交给 Gemini，回答「00:03 右上角出现绿色正方形，保持不动」，正确且没有编造（脚本里的红色移动方块因 ffmpeg 写法错误根本没画出来，模型也没说有）。耗时 42 秒。
+- **BVR 默认的 `gemini-2.5-flash` 已不对新用户开放**（404）；`gemini-flash-latest` 当时 503（高负载），BVR 的请求卡 310 秒后报 `fetch failed`；`gemini-3-flash-preview` 可用。使用时需设 `GEMINI_VIDEO_MODEL=gemini-3-flash-preview`。
+
+**现成网页读取项目**（用户要求以插件解决读网页，不依赖 DeepSeek 搜索 API）。候选：官方 MCP fetch 服务器 `mcp-server-fetch` 2026.11.4（MIT，readability + markdownify）、Crawl4AI 0.9.5（Apache-2.0，无头浏览器）、Playwright MCP 0.0.84（Apache-2.0，浏览器操作）。没有找到现成的 AstrBot 网页读取插件；Jina Reader 是托管服务，会把网址发给第三方，暂不考虑。
+
+`scripts/search/backends.py` 把三个读取器包成同一接口（相同分段大小，返回全部链接），在同一批题上比较：
+
+| | web_reader（现有） | mcp-server-fetch | **Crawl4AI** |
+|---|---|---|---|
+| 直接链接 5 题能读到原文 | 5/5 | 5/5 | 5/5 |
+| 沿正确路径时下一步链接被交出（4 题） | 1/4 | 1/4 | **4/4** |
+| 萌娘百科（本容器 requests 直连 403） | 403 | 403 | **浏览器可以打开**，连续读了 40 页 |
+| 每页耗时 | 0.1–1 s | 1–4 s | 1–5 s（复用同一浏览器） |
+
+- 链接测试（`scripts/search/link_exposure.py`）：给定通往答案的正确路径，看每一步读取器有没有把下一跳的链接交给模型。web_reader 只给前 60 个链接，GitHub 和文档站的正文链接都在 60 之后；mcp-server-fetch 用 readability 抽正文时把导航、目录都丢了，链接只剩正文里的几个（Python 文档首页只剩 5 个）；Crawl4AI 返回站内和站外的全部链接。
+- 比对原文前要去掉 Markdown 记号和链接语法（例如 Python 文档的原文在 Markdown 里会被 `[conversion table](...)` 隔开），否则会把读到了误判为没读到。
+- Playwright MCP：能通过 CDP 连上本机 Chromium，`browser_snapshot` 返回无障碍树，Python 库索引页 295 个链接都在，但单页快照约 7 万字。它还带 `browser_run_code_unsafe`、`browser_evaluate`、`browser_file_upload` 等高权限工具，接入时必须只开放导航、快照、点击。
+- 本容器没有 Playwright 自带的浏览器，Crawl4AI 和 Playwright MCP 都是通过 CDP 连到 `~/.local/bin/chromium`（130 版）跑的。
+
+**初步结论**：读网页优先用 **Crawl4AI**（包成插件工具：读页面 + 全部链接 + 分段续读），需要点击、展开或登录态的页面再考虑 Playwright MCP。是否真能让模型把深链接里的原文拿回来，要等 DeepSeek 接上后用同一批题测（`reader_eval.py model --backend ...`）；DeepSeek 密钥还没到位（`qqbot-data/tools/deepseek.key`）。
