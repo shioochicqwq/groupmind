@@ -544,3 +544,17 @@
 - **未测**：B 的问答层准确率。等额度充足时，和 V2 补测一起做。
 - **研究发现**：本研究发现，LLM 批次上色过程实际表现出近似单标签的局部语义分段特征。其检索效果主要依赖局部片段结构，而非跨批次重复标注。将局部片段合并为全局长块会显著降低证据注入率，而对重复进行去除、保留局部边界的方案未观察到明确的性能损失。这提示语义主题组织与证据检索单元应分别设计和评估。
 
+
+## D-034 模型分工：视频用 Gemini，其他模型工作用 DeepSeek（用户决定，2026-11-07）
+
+- **做法**：视频理解（Bilibili-Video-Research）用 Gemini 服务商，模型设 `GEMINI_VIDEO_MODEL=gemini-3-flash-preview`（BVR 默认的 `gemini-2.5-flash` 已停用）；其余批量模型工作（回答、写词条、事件问答、网页读取评测等）改用 DeepSeek。始终不用 Claude 模型做批量任务（D-024 起）。
+- **依据**：当时 Gemini 额度将尽。2026-11-07 稍后用户告知 Gemini 额度已恢复，分工未改，变更需用户决定。
+- **密钥**：DeepSeek 在 `qqbot-data/tools/deepseek.key`，Gemini 直连在 `qqbot-data/tools/gemini.key`（均仓库外，不打印）；模型网关（`127.0.0.1:8317`）上的 Gemini、gpt-6.1-sol 仍可用，`bench/llm.py` 从 模型网关 配置读密钥。
+- **口径**：DeepSeek 跑的结果与此前 Gemini 跑的实验是不同条件，台账必须写明模型。
+
+## D-035 网页读取改用现成项目，首选 Crawl4AI（初步，2026-11-07）
+
+- **背景**：用户认为自研 `web_reader` 能力「诡异」，且不希望依赖 DeepSeek 搜索 API（结果和性能不可控），要求用插件解决读网页。
+- **测试**：原文提取 11 题（直接链接 5、深链接 6），见 `docs/research/2026-11-search-module-p0.md` 第 7–8 节。`web_reader` 只返回前 60 个链接，GitHub 和文档站的正文链接被截掉；沿正确路径的链接交出率：web_reader 1/4、mcp-server-fetch 1/4、**Crawl4AI 4/4**；Crawl4AI 的浏览器还能打开直连 403 的萌娘百科。
+- **方向**：把 Crawl4AI 包成插件工具（读页面 + 全部链接 + 分段续读）替换 `web_reader`；需要点击、展开、登录态的页面再考虑 Playwright MCP（只开放导航、快照、点击）。
+- **未完成**：接上模型（DeepSeek）后的原文拿回率与编造率还没测（`scripts/search/reader_eval.py model --backend ...`）；测完再定为正式决定。
