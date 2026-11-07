@@ -158,6 +158,8 @@ Token 策略与实测见 D-016；外部插件版本见 [docs/external-plugins.md
 
 ## 8. 下一步计划
 
+> 2026-11-07：记忆研究和联网模块的待办以 [docs/handover-2026-11-07.md](docs/handover-2026-11-07.md) 为准；下面是部署与调优方面的旧计划。
+
 1. **本地调优优先（用户决定：VPS 暂缓，调好再说）**：
    - 记忆/文件/搜索已就绪；继续按用户方向迭代上下文与省 token（D-016）；
    - 支持用户自写 Skill：[skill-tutorial.md](docs/skill-tutorial.md) + [skills-dev.md](docs/skills-dev.md) + `install_skill.py`；
@@ -369,6 +371,20 @@ Token 策略与实测见 D-016；外部插件版本见 [docs/external-plugins.md
 - 采用 SQLite（`bench/store/`），研究期不换关键词索引，旧→新 ID 对照文件保证旧实验可复现（D-030）。
 - 上色重叠：合并方案显著变差、不采纳（D-031）；采用「去重不合并」B（D-032）。
 - 阶段报告 v1–v3、下一阶段路线和待决问题在 `docs/research/2026-11-memory-*`。
+
+### A-27（2026-11-05～06）梗表与人物打标、梗基线
+
+- 可复用离线打标组件 `bench/labelkit/`；梗表与人物第一轮交回：机器梗表 33 条里 26 条是通用词、本群梗 0；被证据门槛丢掉的抽样里 2/3 是真词（只出现 1–4 次）；6 人各有多个账号。
+- 梗表分两层：通用层跨群共享，本群层不合并（D-033）。
+- 梗基线：不给梗表时模型解释对 43.7%（通用层 48%、本群层 27%），加一段语境通用层到 65%、本群层不变。
+- 结果在 `docs/memory-benchmark-results.md` 末尾几节。
+
+### A-28（2026-11-06）实验分支 exp/humanlike-memory：B 收尾、事件层旁路、文献
+
+- 按《长期记忆与拟人化研发任务书》开分支 `exp/humanlike-memory`（未合入 master、未推送）。
+- B 接入主管线 `bench/retrievers/frozen_pipeline.py`，回归逐题复现旧实验（`bench/check_frozen_pipeline.py`）；B 改变约 78% 的注入内容，问答层待补测（约 680 次回答调用）。说明见 `docs/memory-frozen-pipeline.md`。
+- 事件层旁路原型 `bench/events/`（只引用 B 块，不参与检索），「晚上」打标页已发给用户（等交回），三种方案的预测已预先存档。设计见 `docs/research/2026-11-event-layer-design.md`。
+- 认知科学文献笔记与设计立场：`docs/research/2026-11-cognitive-memory-notes.md`。
 
 ### A-29（2026-11-07）联网与视频模块 P0
 
