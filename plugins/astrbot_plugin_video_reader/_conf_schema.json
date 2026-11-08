@@ -1,0 +1,11 @@
+{
+  "base_url": {"description": "Gemini 原生接口地址（gateway）", "type": "string", "default": "http://127.0.0.1:8317"},
+  "api_key": {"description": "gateway 的 API key", "type": "string", "default": ""},
+  "model": {"description": "视频模型", "type": "string", "default": "gemini-3.8-flash-high"},
+  "ffmpeg": {"description": "ffmpeg 可执行文件路径", "type": "string", "default": "ffmpeg"},
+  "ytdlp": {"description": "yt-dlp 可执行文件路径", "type": "string", "default": "yt-dlp"},
+  "cookies_file": {"description": "可选：Netscape 格式 cookies.txt（B 站登录态可拿更清晰/会员视频）", "type": "string", "default": ""},
+  "proxy": {"description": "可选：下载代理", "type": "string", "default": ""},
+  "workers": {"description": "同一视频并发看几段", "type": "int", "default": 3},
+  "max_concurrent_videos": {"description": "同时处理几个视频", "type": "int", "default": 1}
+}
