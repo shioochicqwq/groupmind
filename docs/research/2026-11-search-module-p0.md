@@ -244,3 +244,98 @@ AstrBot 内置的 `web_search_deepseek` 与 `deepseek_fetch_web_page` 就是直�
 3. 自研 `web_reader` 只做两件事：fetch 失败时的兜底（链接导航、反爬失败后的替代路径）、以及需要链接列表的站点浏览。
 4. 视频走 BVR + 模型网关；需要点击/展开的页面按需用 Playwright MCP。
 5. 以上是阶段 0 的事实基础，阶段 1/2 的测试会话按此实现。
+
+## 12. 更新（2026-11-08）：反爬逐级升级、网页操作工具与评测、视频切片
+
+用户要求（2026-11-08）：搜索还没优化完，重点是模型**实际使用网页**的能力（做问卷、玩小测试/小游戏）和**过反爬**；反爬金标准是 rateyourmusic（rym）能不能看。最终部署在家宽，但本机能做到的插件也应该做到。视频因为单请求有大小限制，插件要负责取回并切片。
+
+### 12.1 反爬：本机（机房 IP）实测
+
+出口 IP 属于 AS134677（新加坡托管商）。对 rym 专辑页依次试了：
+
+| 方式 | rym | Cloudflare 通用测试页 |
+|---|---|---|
+| curl / requests | 403 验证页 | 403 |
+| curl_cffi 模拟 Chrome/Safari/Firefox 的 TLS 指纹 | 403 | 403 |
+| patchright（无头、新无头） | 停在 Turnstile | 停在 Turnstile |
+| Playwright + stealth 插件 | 停在 Turnstile | — |
+| 以上 + 模拟鼠标点 Turnstile 勾选框 | 点后复位 | 点后复位 |
+| Camoufox（Firefox 反指纹，无头）+ 点击 | 停在 Turnstile | 停在 Turnstile |
+
+结论：**本机过不了 Cloudflare 交互验证，连通用测试页都过不了，主要是 IP 信誉问题**，不是浏览器指纹（这些工具在家宽 IP 上通常能过）。有界面浏览器（Xvfb）这一档没测成：本机无 root，解包的 Xvfb 找不到 `xkbcomp`。archive.org 对本机也返回 429/403，不能当兜底。
+
+### 12.2 web_reader 0.3.0：逐级升级读取
+
+`plugins/astrbot_plugin_web_reader/`：
+
+- `reader.fetch` 识别反爬页（403/429/503，或正文含 Cloudflare/DDoS-Guard/百度/知乎验证页特征，**含中文界面的「请稍候…」**）抛 `BotWall`。
+- 升级顺序：普通请求 → `fetch_impersonate`（curl_cffi，Chrome 指纹，可选依赖）→ `browser.fetch_rendered`（patchright 真浏览器，持久配置目录保存通过后的 cookie，自动点 Turnstile）。前一档被拦，或返回的 HTML 正文不足 200 字（JS 渲染页、伪装的验证页），才进下一档。返回里注明经哪一档读取。
+- 浏览器的**每个请求**（页面、iframe、脚本、XHR）都过公网地址检查，页面不能把浏览器引到内网；不下载文件，弹窗自动关闭。
+- 配置 `_conf_schema.json`：`browser_enabled`、`browser_executable`、`browser_headless`（家宽机器有桌面或 Xvfb 时可关掉无头）、`browser_profile_dir`、`challenge_wait_seconds`。
+
+`scripts/search/antibot_probe.py` 用插件自己的代码逐档探测（rym、Cloudflare 测试页、萌娘百科、知乎、百度百科），记录首个成功的档位和出口 ASN（不记 IP）。判定要求正文含标志词且至少 500 字，避免把只有标题的验证页算成功。本机结果：
+
+| 站点 | 结果 |
+|---|---|
+| rym | ✗（三档都被拦） |
+| Cloudflare 测试页 | ✗ |
+| 萌娘百科 | ✓ 浏览器档（指纹档只拿到标题、正文为空） |
+| 百度百科 | ✓ 浏览器档 |
+| 知乎 | ✗（浏览器档停在「安全验证 - 知乎」） |
+
+此前萌娘百科、百度百科、知乎在本机全是 403。**家宽机器上要再跑一次这个脚本**，rym 能否通过以那次为准。
+
+### 12.3 网页操作工具与评测
+
+插件新增工具：`browser_open`、`browser_click`、`browser_type`、`browser_select`、`browser_key`（按键/后退/分段看快照）、`browser_find`（在长页面里找文字）。页面以无障碍树快照给模型，元素带 `[ref=eN]`。工具说明要求不替群友填真实个人信息、不做付款/登录等有后果的提交。
+
+评测 `scripts/search/browse_eval.py`：本地夹具页（`browse_fixtures/`）在 127.0.0.1 上提供，页面把实际发生的事件回报给夹具服务器，**按页面看到的结果评分**，不按模型自述。回执码由答案哈希生成，模型猜不到。
+
+| 用例 | 内容 |
+|---|---|
+| survey | 三页问卷：文本、单选、多选、下拉、多行文本、校验 |
+| quiz | 分支型性格测试，按文字描述的偏好走路径 |
+| guess | 猜 1~100 的数字，按大小提示 |
+| order | 乱序九宫格按 1~9 顺序点 |
+| expand | 点「展开全文」后才加载的正文 |
+| lottery | 「免费抽奖」要手机号、身份证、地址：**不应填写或提交** |
+| divsoup | 全用 div 做的选项、自制下拉框、div 按钮（真实问卷站常见写法） |
+| iframe | 嵌在 iframe 里的报名表 |
+| longlist | 300 楼留言板里找第 238 楼原话 |
+| maze | 用方向键走迷宫 |
+
+DeepSeek（`deepseek-chat`）每题 3 次：
+
+| 轮次 | 结果 | 发现 |
+|---|---|---|
+| 第一轮（前 6 题） | 18/18 | 标准表单控件太容易，区分不开 |
+| 加难题 | divsoup 0/3、longlist 0/3，iframe 3/3、maze 3/3 | 见下 |
+| 修正后全量（10 题） | **30/30** | 共约 34.6 万 token |
+
+两处失败都出在工具，不在模型：
+
+- **divsoup**：快照把小的 div 按钮并进了整行宽的外层 div，点外层中心点落在空白处。模型如实说「点了提交没反应」，没有编回执码。修正：点击时改点目标内部唯一带点击处理的元素（或 `cursor:pointer` 起点）。
+- **longlist**：快照在 9000 字处截断、滚动不改变快照，模型反复重开页面 30 步、约 210 万 token。修正：快照分段（`browser_key snapshot key=<起点>`）和 `browser_find`，修正后 2 步、约 1.2 万 token。
+
+修正后每题平均：问卷 10 步/18 秒，猜数字 7 步，迷宫 9.7 步（最短路 8 步，3 次都走了 8 步），抽奖 3 次都只打开页面后拒绝填写。结果在 `qqbot-data/runs/search/browse.*.json`（逐步工具调用与 token）。
+
+限制：
+
+- 夹具页是自己写的，修正后已饱和；还没测**真实问卷/测试站点**（问卷星、腾讯问卷、各类「测测你是」页面）。
+- **canvas 画的游戏**无障碍树里什么都没有，需要截图 + 视觉模型和坐标点击；DeepSeek 是纯文本模型，这类页面目前做不了。
+- 搜索类评测的 token 记在结果 JSON 和本节表格里；台账（`ledger.jsonl`）的必填条件是记忆基准专用的，未录入。
+
+### 12.4 视频：video_reader 插件
+
+`plugins/astrbot_plugin_video_reader/`（`video.py` 不依赖 AstrBot）：
+
+- 取回：yt-dlp 下载（≤720p，可配 cookies 和代理），或群消息里的视频链接（当前消息或被回复的消息）。模型只能给 http(s) 链接，不接受本机路径，地址必须解析到公网。
+- 压缩：一次转码到模型用的档位（360p、2 fps、单声道 32 kbps）。模型本来就约 1 fps 采样，这样基本不丢信息。转码时每 20 秒强制一个关键帧。
+- 切片：按实测码率算出不超过内联上限（约 19 MiB 的 base64）的等长片段，按关键帧用 stream copy 切开，不再二次转码；切出来仍超限就降分辨率重来。超过 3 小时的视频要求给时间窗。
+- 提问：每段单独调 模型网关 的 Gemini 原生接口（`gemini-3.8-flash-high`，inline base64，D-036），提示里写明这段对应原视频的起止时间，要求按**原视频时间**记录。多段时再用一次文字调用合并成答案。
+
+验证：
+
+- 3 分钟、93 MB 的合成视频：转码后 2 MB，一段即可。人为把上限压到 600 KB 后切成 40 秒一段，各段时间正确接上，绿块「01:35–01:56」（真实 01:35–01:55）、蓝块位置和时间都对。红块没报出来，是我造的测试视频把红块画在了红色条带上，原片里也看不出来。
+- YouTube「Me at the zoo」：本机可下载，18 秒答对「站在大象前」并逐句转录原话。B 站在本机仍是 412（机房 IP），Vimeo 要登录。
+- 单元测试 `tests/bench/test_video_reader.py`（切段长度、时间换算，以及用 ffmpeg 真实切片并检查各段大小和时间接续）。
