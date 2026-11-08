@@ -23,10 +23,14 @@ CHUNK = 6000
 _MD_LINK = re.compile(r"\[([^\]]*)\]\(([^)\s]+)(?:\s+\"[^\"]*\")?\)")
 
 
-def _page(url: str, title: str, full: str, links: list, offset: int) -> dict:
+def _page(url: str, title: str, full: str, links: list, offset: int, links_offset: int = 0, links_page: int = 150) -> dict:
     end = min(len(full), offset + CHUNK)
+    lo = max(0, min(int(links_offset), len(links)))
+    shown = links[lo : lo + links_page]
     return {"ok": True, "url": url, "title": title, "text": full[offset:end], "start": offset, "end": end,
-            "more": end < len(full), "links": links, "total_chars": len(full)}
+            "more": end < len(full), "links": shown, "links_total": len(links),
+            "links_more": lo + len(shown) < len(links), "links_next": lo + len(shown) if lo + len(shown) < len(links) else None,
+            "total_chars": len(full)}
 
 
 @lru_cache(maxsize=256)
@@ -41,7 +45,7 @@ def _web_reader(url: str):
         if not d.get("more"):
             break
         off = d["end"]
-    first = reader.extract(body, final)
+    first = reader.extract(body, final, links_limit=None)
     return final, first.get("title", ""), "".join(parts), tuple(first["links"])
 
 
@@ -89,9 +93,9 @@ def _crawl4ai(url: str):
 BACKENDS = {"web_reader": _web_reader, "mcp_fetch": _mcp_fetch, "crawl4ai": _crawl4ai}
 
 
-def read(backend: str, url: str, offset: int = 0) -> dict:
+def read(backend: str, url: str, offset: int = 0, links_offset: int = 0, links_page: int = 150) -> dict:
     try:
         final, title, full, links = BACKENDS[backend](url)
-        return _page(final, title, full, list(links), offset)
+        return _page(final, title, full, list(links), offset, links_offset, links_page)
     except Exception as e:  # noqa: BLE001
         return {"ok": False, "error": f"{type(e).__name__}: {str(e)[:200]}"}

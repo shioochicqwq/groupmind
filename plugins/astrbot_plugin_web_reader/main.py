@@ -31,17 +31,21 @@ class WebReaderPlugin(Star):
         event: AstrMessageEvent,
         url: str,
         offset: int = 0,
+        links_offset: int = 0,
         limit: int = 6000,
     ) -> str:
         """读取一个网页的正文和页面内链接（本地抓取，返回内容+链接列表，适合“看看这个网站/文章”）。
 
         用法建议：用户给出 URL 时用它；如果返回的是网站首页/目录（正文很短、链接很多），
-        从 links 里挑具体文章 URL 再调用一次；正文被截断时用 offset 继续读。
-        如果抓取失败或内容不相关，按你平时的口吻自然回应（比如网不好、等会儿看），不要编造网页内容。
+        从 links 里挑具体文章 URL 再调用一次；正文被截断时用 offset 继续读；
+        链接被截断（提示 links_more）时用 links_offset 继续读更多链接（正文区链接排在前面）。
+        如果要在回答里引用网页原文，先确认这段原文出现在本次返回的 content 里；没看到就用 offset 续读，
+        不要凭记忆或猜测补全网页内容。如果抓取失败或内容不相关，按你平时的口吻自然回应（比如网不好、等会儿看）。
 
         Args:
             url(string): 要读取的完整 http/https URL
             offset(number): 正文起始字符偏移，默认 0；用于续读长文
+            links_offset(number): 链接列表起始位置，默认 0；返回里提示 links_more 时用它续读
             limit(number): 本次最多返回的正文长度（500-12000），默认 6000
         """
         url = (url or "").strip()
@@ -52,7 +56,7 @@ class WebReaderPlugin(Star):
             if "html" not in ctype.lower() and "text" not in ctype.lower():
                 return f"错误：不支持的内容类型 {ctype or '(unknown)'}"
             data = await asyncio.to_thread(
-                extract, raw, final_url, int(offset or 0), int(limit or 6000)
+                extract, raw, final_url, int(offset or 0), int(limit or 6000), int(links_offset or 0)
             )
             return format_result(data)
         except BlockedURL as exc:
