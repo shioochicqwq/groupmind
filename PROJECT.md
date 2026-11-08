@@ -376,3 +376,16 @@ Token 策略与实测见 D-016；外部插件版本见 [docs/external-plugins.md
 - 网页读取比较：Crawl4AI 明显优于现有 `web_reader` 和 mcp-server-fetch（D-035，初步）。
 - 模型分工：视频 Gemini，其余 DeepSeek（D-034）。
 - 记录在 `docs/research/2026-11-search-module-p0.md`；交接清单见 `docs/handover-2026-11-07.md`。
+
+### A-30（2026-11-07）网页读取模型版、视频改走 模型网关
+
+- **网页读取接模型实测**（`reader_eval.py model`，11 题）：web_reader 10/11 答对、1 编造；mcp-server-fetch 9/11、0 编造；Crawl4AI 10/11、2 编造。与无模型 ceiling 的「web_reader 链接截断」结论不同，模型会直接猜目标 URL。**DeepSeek 密钥（`qqbot-data/tools/deepseek.key`）实测 401 invalid**，本轮临时改用 模型网关 的 gemini-3.8-flash-high，与 D-034 口径不同，待补有效密钥后复测。D-035 暂不升级为正式决定。
+- **视频（及所有 Gemini 调用）改走 模型网关**（用户决定，D-036）：模型网关 有 Gemini 原生接口、无 Files API；BVR（仓库外 `qqbot-data/vendor/bvr`）已改 `src/video-analysis.ts` 支持 `GEMINI_BASE_URL` + inline base64，6 秒合成视频经 MCP `analyze_video` 实测正确（8.45 s）。限制：>23 MiB 视频不能内联。
+- 环境备注：本机 2 核 / 3.8GB 内存，跑批量模型调用时不要同时开多个重任务；磁盘当前约 80% 已用。
+
+### A-31（2026-11-07）DeepSeek 密钥修复与搜索模块改进
+
+- **DeepSeek 密钥修复**：`qqbot-data/tools/deepseek.key` 换成 dsh 凭据里的有效 key（旧 key 对 `api.deepseek.com` 返回 401）。网页读取评测恢复 D-034 的 DeepSeek 口径。
+- **web_reader 0.2.0**（`plugins/astrbot_plugin_web_reader/`）：正文区链接优先（`article`/`main` 再补整页）、链接上限 60→150、新增 `links_offset` 分页与 `links_more`/`links_next`、工具说明加「引用原文前必须确认它出现在返回内容里」。新增 5 项单元测试（`tests/bench/test_web_reader.py`，全仓 106 项通过）。
+- **评测判定修正**：`reader_eval.py` 的「编造」从「整段原文逐字匹配」改为「5 字符片段覆盖率 <0.5 才算编造」，修掉列表拼接/标点差异造成的假阳性；旧结果保留，新结果 `model2_ds.*.json`。
+- **DeepSeek 口径三读取器打平**：11 题模型版 web_reader / mcp-server-fetch / Crawl4AI 都是 10/11；编造 0 / 0 / 1；平均 3.5 / 10.2 / 11.9 秒。**不引入 Crawl4AI 作为默认读取器**（D-037），Playwright MCP 留给需要点击/登录态的页面。

@@ -558,3 +558,50 @@
 - **测试**：原文提取 11 题（直接链接 5、深链接 6），见 `docs/research/2026-11-search-module-p0.md` 第 7–8 节。`web_reader` 只返回前 60 个链接，GitHub 和文档站的正文链接被截掉；沿正确路径的链接交出率：web_reader 1/4、mcp-server-fetch 1/4、**Crawl4AI 4/4**；Crawl4AI 的浏览器还能打开直连 403 的萌娘百科。
 - **方向**：把 Crawl4AI 包成插件工具（读页面 + 全部链接 + 分段续读）替换 `web_reader`；需要点击、展开、登录态的页面再考虑 Playwright MCP（只开放导航、快照、点击）。
 - **未完成**：接上模型（DeepSeek）后的原文拿回率与编造率还没测（`scripts/search/reader_eval.py model --backend ...`）；测完再定为正式决定。
+
+> **D-035 补记（2026-11-07 晚）：模型版实测与初步结论相反。** 11 题接上模型（临时用 模型网关 的 gemini-3.8-flash-high，DeepSeek 密钥 401 无效）后：web_reader 10/11、mcp-server-fetch 9/11、Crawl4AI 10/11；编造分别是 1 / 0 / 2 题。模型会直接猜目标 URL，绕开「只返回前 60 个链接」的限制。样本太小，**D-035 暂不升级为正式决定**；DeepSeek 密钥恢复后复测、扩大题量再定。详见 `docs/research/2026-11-search-module-p0.md` 第 9 节。
+
+## D-036 视频与所有 Gemini 调用统一走 模型网关，不用官方 Gemini API（用户决定，2026-11-07）
+
+- **背景**：用户明确「Gemini 因为没有官方 API 额度，所以走 模型网关」。此前视频走直连 Google Gemini（`qqbot-data/tools/gemini.key`），与 模型网关 额度是两回事。
+- **做法**：Gemini 调用一律经本地模型网关（`127.0.0.1:8317`），模型用 **gemini-3.8-flash-high**（与旧实验同模型；模型网关 目录里没有 BVR 默认的 `gemini-2.5-flash`，也没有 `gemini-3-flash-preview`）。
+- **依据与调查**：
+  - 模型网关 提供 Gemini 原生接口 `POST /v1beta/models/<model>:generateContent`（Bearer 或 `?key=` 均可），实测可用。
+  - 模型网关 **不提供 Files API**：`/v1beta/files` 与 `/upload/v1beta/files` 均 404。所以 BVR 原先「上传视频到 Files API → 按 URI 引用」的路径在 模型网关 上走不通。
+  - 视频可以内联：Gemini 原生接口接受 `inlineData` + base64，单请求上限约 23 MiB（BVR 的 DFSC 模式原本就是这个上限）。
+- **实现**：修改仓库外的 vendored 代码 `qqbot-data/vendor/bvr/src/video-analysis.ts`（基线 commit `db78c19`）：设置 `GEMINI_BASE_URL` 时，用 `@google/genai` 的 `httpOptions.baseUrl` 指向 模型网关，并用 inline base64 代替 Files API；视频与文字两条路径都支持。未改 BVR 的 MCP 工具面。
+- **验证**：6 秒合成视频（第 3 秒右上角出现绿色方块），直接调 模型网关 原生接口 3.9 秒答对；经 BVR MCP `analyze_video` 8.45 秒答对（时间、颜色、位置、不确定性都正确）。
+- **限制/风险**：
+  - >23 MiB 的视频不能内联，B 站长视频要先用 `inspect_video_window` 截取片段，或等 模型网关 支持 Files API。
+  - 模型网关 是本地代理，可用性取决于上游账号状态；视频调用可能比文本慢。
+  - 真实 B 站视频（下载、字幕、长视频）仍需在机器人实际运行的机器上测（本容器机房 IP 下载失败）。
+  - `analyze_video` / `inspect_video_window` 可读本机任意路径，**不暴露给 RP 层**（沿用 A-29 的约束）。
+- **关系**：D-034 的「视频用 Gemini、其余用 DeepSeek」仍按原文保留；D-036 只改「Gemini 走哪条路」。其余批量工作仍应用 DeepSeek（待有效密钥）。
+
+> **D-034 补记（2026-11-07）：DeepSeek 密钥已换。** `qqbot-data/tools/deepseek.key` 原值对 `api.deepseek.com` 返回 401；用户授权从 dsh 凭据（`~/.dsh/.credentials.yaml` 的 `DEEPSEEK_API_KEY`）取有效 key 写入该文件（权限 600），实测 `deepseek-chat` 可用。网页读取评测已改用 DeepSeek 口径。
+
+## D-037 搜索模块先改进自研 web_reader，不引入 Crawl4AI 作为默认读取器（2026-11-07）
+
+- **背景**：D-035 的初步结论是「Crawl4AI 明显更好」，依据是无模型 ceiling：沿正确路径的下一跳链接交出率 Crawl4AI 4/4、web_reader 1/4。但那是**无模型**的测试，模型本身会用其它方式找目标。
+- **实验（DeepSeek 口径，11 题模型版）**：web_reader 0.2.0 与 mcp-server-fetch、Crawl4AI 都答对 10/11；编造 0 / 0 / 1；平均每题 3.5 / 10.2 / 11.9 秒。改进后的 web_reader（正文优先 + 150 链接 + 分页）在 ceiling 上的深链接可达从 1/4 升到 2/4。
+- **决定**：继续用自研 `web_reader` 作为默认网页读取工具，**不把 Crawl4AI 或 Playwright 装成常驻依赖**；需要点击、展开、登录态的页面按需用 Playwright MCP（只开放导航、快照、点击，沿用 A-29 约束）。
+- **依据**：读取器之间的差距在模型版里消失，瓶颈转移到模型行为（读不到时会猜 URL、引用记忆里的内容）；Crawl4AI 慢 3 倍，还要维护常驻浏览器。评测方法上，原来的「整段原文逐字匹配」会把列表拼接、标点差异误判成编造，已改为字符片段覆盖率。
+- **未决/限制**：样本只有 11 题，k6（萌娘百科）受本容器机房 IP 的 403 限制；真实使用场景要扩大题量后再复核。Crawl4AI 仍保留在 `qqbot-data/vendor/readers-venv` 供对照实验，不删。
+- **代码**：`plugins/astrbot_plugin_web_reader/{reader,main}.py`（0.2.0）、`scripts/search/{reader_eval,backends}.py`；验证 `tests/bench/test_web_reader.py` 与 `model2_ds.*.json`。
+
+## D-038 搜索模块以 DeepSeek 官方 search/fetch 为主，自研只补缺口（2026-11-07）
+
+- **背景**：用户指出重新考虑实现方式——DeepSeek API 本身有搜索与 fetch，自建插件的前提只是「API 读不了群友发的链接、看不了视频、会被反爬挡」。此前把比较重点放在「哪个网页读取器更好」，偏离了搜索模块的整体问题。
+- **核实（2026-11-07 实测 + 源码/文档）**：
+  - 官方只提供 `POST /v1/tools/search` 与 `POST /v1/tools/fetch`；实测 search 0.4 s、fetch 0.13 s，`need_content=true` 可在搜索时直接带回正文，计费各 5 元/1000 次成功请求。
+  - **没有官方 research 端点**：`/v1/tools/research` 返回 404，官方指南只列 search/fetch；第三方 `deepseek_research` 是 search+fetch 的组合封装。
+  - AstrBot 内置的 `web_search_deepseek` / `deepseek_fetch_web_page` 就是直调这两个端点（`astrbot/core/tools/web_search_tools.py`），项目不需要自建平行搜索。
+  - 非 FROZEN 群 4 个、共 93,214 条消息；`store/memory.db` 现有 2 个 DEV 群，需补导入 `eb61a2`、`0f51cf`。
+- **决定**：
+  - 搜索主路径 = AstrBot 内置 DeepSeek search / fetch；`need_content` 用于一次拿到正文。
+  - “research” = 工具层循环 search → 选源 → fetch → 换源，**不新增独立研究 Agent**，也不依赖未文档化端点。
+  - 自研 `web_reader` 只做兜底：fetch 失败时的链接导航/替代读取；其 0.2.0 的正文优先与链接分页保留。
+  - 视频继续走 BVR + 模型网关（D-036）；需要点击/展开/登录态的页面按需用 Playwright MCP（只开放导航、快照、点击）。
+- **关系**：D-035（首选 Crawl4AI）与 D-037（web_reader 作为默认读取器）中关于「默认读取器」的表述由本条重新定位；D-037 对 web_reader 的改进与评测方法修正仍然有效。
+- **验证**：`docs/research/2026-11-search-module-p0.md` 第 11 节（实测与群规模）；阶段 1/2 的人工体验会话按此分工实现。
+

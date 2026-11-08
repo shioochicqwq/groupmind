@@ -131,3 +131,116 @@ B 站公开接口（T0，不登录，普通请求头）：`x/web-interface/view`
 - 本容器没有 Playwright 自带的浏览器，Crawl4AI 和 Playwright MCP 都是通过 CDP 连到 `~/.local/bin/chromium`（130 版）跑的。
 
 **初步结论**：读网页优先用 **Crawl4AI**（包成插件工具：读页面 + 全部链接 + 分段续读），需要点击、展开或登录态的页面再考虑 Playwright MCP。是否真能让模型把深链接里的原文拿回来，要等 DeepSeek 接上后用同一批题测（`reader_eval.py model --backend ...`）；DeepSeek 密钥还没到位（`qqbot-data/tools/deepseek.key`）。
+
+## 9. 更新（2026-11-07）：接模型测原文拿回率；视频改走 模型网关
+
+**网页读取模型版**。`scripts/search/reader_eval.py model`，同一批 11 题，每题最多 8 步，工具是各 backend 的 `read(url, offset)`。**模型不是原计划的 DeepSeek**：`qqbot-data/tools/deepseek.key` 实测返回 401 `api key ... is invalid`，临时改用 模型网关 的 **gemini-3.8-flash-high**（`--endpoint http://127.0.0.1:8317/v1/chat/completions --model gemini-3.8-flash-high`）。这与 D-034 的 DeepSeek 口径不同，DeepSeek 密钥恢复后应复测。结果在 `qqbot-data/runs/search/model.<backend>.json`。
+
+| | web_reader | mcp-server-fetch | Crawl4AI |
+|---|---:|---:|---:|
+| 答对（标准原文出现在回答里） | **10/11** | 9/11 | **10/11** |
+| 编造（引用的所谓原文不在读过的页面里） | 1（k5） | 0 | 2（d1、k6） |
+| 承认读不到 | 1（k6） | 1（k6；k5 空回答） | 0 |
+| 平均每题耗时 | 13.3 s | 18.7 s | 22.9 s |
+
+- **与无模型 ceiling 的结论不同**：ceiling 里 web_reader 沿正确路径只交出 1/4 的下一跳链接，但接上模型后，模型会直接猜目标 URL（k2 一次读取 `raw.githubusercontent.com/.../src/index.ts`），或用其它路径绕开被截掉的链接，结果 11 题答对 10。所以「只返回前 60 个链接」不必然让任务失败，模型会补。
+- **真正要担心的是编造**：web_reader 的 k5、Crawl4AI 的 d1 和 k6 都引用了没读到的「原文」。Crawl4AI 的浏览器能打开萌娘百科，但 k6 仍没拿到标准原文并编造。mcp-fetch 没编造，但 k5 在 8 步内没给出答案。
+- **结论**：D-035（首选 Crawl4AI）暂不升级为正式决定。样本只有 11 题，三种读取器在这批题上的差距小于预期；等 DeepSeek 密钥恢复后复测，并把题量和真实使用场景（梗、百科、文档）扩大后再定。
+
+**视频走 模型网关（用户决定，2026-11-07）**。本机没有官方 Gemini API 额度，Gemini 一律走 模型网关。
+
+- 模型网关 提供 Gemini 原生接口：`POST http://127.0.0.1:8317/v1beta/models/<model>:generateContent`（Bearer 或 `?key=` 均可），**不提供 Files API**：`/v1beta/files`、`/upload/v1beta/files` 都返回 404。
+- 所以视频只能内联：`inlineData` + base64，单请求 ≤ 23 MiB。一段 6 秒合成视频（第 3 秒右上角出现绿色方块）直接调该接口：3.9 秒，回答完全正确。
+- 已改 `qqbot-data/vendor/bvr/src/video-analysis.ts`（基于 commit `db78c19`，仓库外 vendored 代码）：设置 `GEMINI_BASE_URL` 时把 `@google/genai` 的 `httpOptions.baseUrl` 指向 模型网关，视频与文字两条路径都改用 inline base64 代替 Files API。BVR MCP 的 `analyze_video` 用同一段视频实测：8.45 秒，时间、颜色、位置都答对。
+- 用法：`CODEX_VIDEO_PROVIDER=gemini GEMINI_API_KEY=<模型网关 key> GEMINI_BASE_URL=http://127.0.0.1:8317 GEMINI_VIDEO_MODEL=gemini-3.8-flash-high`。
+- **限制**：超过 23 MiB 的视频不能走 模型网关 inline，B 站长视频需要先用 `inspect_video_window` 截取片段，或等 模型网关 支持 Files API。`analyze_video`/`inspect_video_window` 仍不暴露给 RP 层（可读任意本机路径）。
+
+## 10. 更新（2026-11-07）：DeepSeek 口径复测、web_reader 0.2.0 改进与验证
+
+**密钥**：`qqbot-data/tools/deepseek.key` 换成 dsh 凭据里的有效 key（旧 key 对 `api.deepseek.com` 返回 401）。本节的评测都用 `deepseek-chat`。
+
+**判定方法修正**：原来的「编造」判定要求模型引用的整段原文一字不差地出现在读过的文本里，结果把**列表项拼接、`True:` 与 `true :` 的标点差异**都判成编造（k5、k4 是假阳性；核对页面后，模型引用的两部分都在页面里）。现在改成：取引用里所有 5 字符片段，落在读过的文本里的比例（`quote_coverage`），低于 0.5 才算编造；旧结果文件保留不动，新结果见 `model2_ds.*.json`。
+
+**三个读取器在 DeepSeek 下的模型版结果**（11 题，每题最多 8 步，同一批题）：
+
+| | web_reader 0.2.0 | mcp-server-fetch | Crawl4AI |
+|---|---:|---:|---:|
+| 答对 | 10/11 | 10/11 | 10/11 |
+| 编造（覆盖率 <0.5） | **0** | **0** | 1（d1，0.33） |
+| 承认读不到 | 0 | 0 | 0 |
+| 平均每题耗时 | **3.5 s** | 10.2 s | 11.9 s |
+
+三者在答对题数上没有差别；k6（萌娘百科）三者都因本容器 403 失败，且都没有明确说「无法获取」（8 步用尽后给了别的结尾）。**Crawl4AI 在 DeepSeek 下没有优势，反而慢 3 倍且要维护浏览器**。
+
+**web_reader 0.2.0 的改动**（`plugins/astrbot_plugin_web_reader/`）：
+
+1. **正文区链接优先**：先收集 `article`/`main` 里的链接，再补整页链接，导航栏/侧边栏再也挤不掉正文链接。
+2. 链接上限 60 → 150；新增 `links_offset` 参数和 `links_more`/`links_next`，模型可以分页续读更多链接。
+3. 工具说明加约束：引用原文前必须确认它出现在本次返回的 content 里，没看到就用 `offset` 续读。
+4. 单元测试 5 项（`tests/bench/test_web_reader.py`）：正文优先、分页、全部链接、自链/重复/非 http 过滤、`links_more` 提示。
+
+**改进前后对比**（DeepSeek，同一批题，旧判定/新判定并列）：
+
+| | 旧版 60 链接 | 0.2.0（正文优先+150+分页） |
+|---|---:|---:|
+| 答对 | 10/11 | 10/11 |
+| 编造（旧判定） | 2（k4、k5，均已核实为假阳性） | 1（k5，假阳性） |
+| 无模型 ceiling：深链接可达 | 1/4 | 2/4（k4 从不可达变可达） |
+| 平均耗时 | 3.6 s | 3.5 s |
+
+**结论与下一步**：
+
+- 读网页的瓶颈不在读取器本身（三者打平），而在**模型行为**：读不到时会猜 URL（k2/k3 猜中）或直接引用记忆里的内容（旧判定把它误判成编造）。因此优先把「引用必须来自已读内容」做成生产提示，而不是引入更重的浏览器方案。
+- **不引入 Crawl4AI 作为默认读取器**：慢、要有浏览器的常驻依赖，DeepSeek 下收益为 0。Playwright MCP 留给需要点击/登录态的页面，按需接。
+- 题量只有 11 题，k6 受本容器机房 IP 限制；真实使用场景（梗、百科、文档站）的样本要扩大后再定长期方案。
+
+## 11. 重新审视实现方式（2026-11-07 晚）：DeepSeek 官方 search/fetch 实测与分工定位
+
+用户指出：不应该把前面的网页读取对比当成整个搜索模块的架构结论；DeepSeek API 本身有搜索、fetch（以及用户提到的 research）能力，自建插件的理由只是补「群友发的链接、视频、反爬」这些 API 做不到的部分。这一节是重新核实的记录。
+
+### 11.1 官方能力实测（用 `qqbot-data/tools/deepseek.key`，各调用 1–2 次）
+
+| 接口 | 结果 | 耗时 | 备注 |
+|---|---|---|---|
+| `POST /v1/tools/search`（`need_content=false`） | 200，5 条结果 | 0.41 s | 字段齐全：`title/url/snippet/summary/content/date/authority/rerank_score`；中文 query 的结果混入葡语/法语时间线页，语言不保证 |
+| `POST /v1/tools/search`（`need_content=true`） | 200，3 条 | 0.39 s | 首条 `content` 12,167 字符；一次 search 可拿到正文，省一次 fetch |
+| `POST /v1/tools/fetch`（已知页面） | 200 | 0.13 s | `title` 可为空，`content` 为 Markdown |
+| `POST /v1/tools/fetch`（不存在的页面） | 404 | 3.2 s | `failed to fetch URL`（`not_found_error`） |
+| `POST /v1/tools/research`（探测） | **404** | 0.18 s | 无错误体 |
+
+**结论**：
+- 官方文档只提供 Search 与 Fetch 两个端点（[指南](https://api-docs.deepseek.com/zh-cn/guides/search.md)、[Search API](https://api-docs.deepseek.com/zh-cn/api/search.md)、[Fetch API](https://api-docs.deepseek.com/zh-cn/api/fetch.md)）。
+- **“research”没有官方端点**：`/v1/tools/research` 返回 404，官方文档也未列出。第三方包（如 seekfetch）提供的 `deepseek_research` 是「search + fetch 组合」的封装，不是新接口。要“研究式检索”，应由工具层循环 search → 选源 → fetch 实现。
+- 计费：Search / Fetch 各 5 元 / 1000 次成功请求；QPS Search 100、Fetch 25（账号级，Fetch 另有按域名限制）。
+
+### 11.2 AstrBot 侧的实际实现（源码核实）
+
+AstrBot 内置的 `web_search_deepseek` 与 `deepseek_fetch_web_page` 就是直调上述两个端点（源码 `astrbot/core/tools/web_search_tools.py`）：
+
+- `web_search_deepseek`：POST `/v1/tools/search`，参数 `query/count/ori_question/need_content`，把 `summary`（或 `snippet`）交给模型，`need_content=true` 时附 `content`；
+- `deepseek_fetch_web_page`：POST `/v1/tools/fetch`，返回 `URL/Title/Content`；
+- 两者共用 `provider_settings.websearch_deepseek_key`，没有 research 工具。
+
+也就是说，**项目原本的“API 搜索 + 插件补链接/视频”分工是对的**；此前把比较重点放到「哪个网页读取器更好」偏离了问题。
+
+### 11.3 记忆测试会话的群规模（阶段 0 核对）
+
+`qqbot-data/reconciled` 有 7 个群，其中非 FROZEN 的 4 个：
+
+| 群代号 | 角色 | 消息行数 |
+|---|---|---:|
+| `4fe395` | DEV | 15,946 |
+| `ed14b7` | DEV | 46,282 |
+| `eb61a2` | VALIDATION | 18,585 |
+| `0f51cf` | 未分类 | 12,401 |
+| 合计 | — | **93,214** |
+
+`store/memory.db` 目前只导入 2 个 DEV 群（62,041 条消息）；记忆测试会话要覆盖 4 个非 FROZEN 群，需要补导入 `eb61a2`、`0f51cf` 并重建索引。FROZEN 的 3 个群继续排除。
+
+### 11.4 阶段 0 结论
+
+1. 搜索主路径用 **AstrBot 内置 DeepSeek search/fetch**，不自建平行搜索。
+2. “research”用 **search + fetch 组合**实现（工具层循环），不依赖未文档化端点。
+3. 自研 `web_reader` 只做两件事：fetch 失败时的兜底（链接导航、反爬失败后的替代路径）、以及需要链接列表的站点浏览。
+4. 视频走 BVR + 模型网关；需要点击/展开的页面按需用 Playwright MCP。
+5. 以上是阶段 0 的事实基础，阶段 1/2 的测试会话按此实现。
