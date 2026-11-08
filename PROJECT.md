@@ -393,15 +393,36 @@ Token 策略与实测见 D-016；外部插件版本见 [docs/external-plugins.md
 - 模型分工：视频 Gemini，其余 DeepSeek（D-034）。
 - 记录在 `docs/research/2026-11-search-module-p0.md`；交接清单见 `docs/handover-2026-11-07.md`。
 
-### A-30（2026-11-07）网页读取模型版、视频改走 模型网关
+### A-30（2026-11-07）补测启动：B 问答层、网页读取模型版、视频改走 模型网关
 
+- **B 问答层补测完成**（补 D-032 的缺口）：DEV-1 端到端 84.1%（A/V2 85.5%，配对 −1.4，CI −3.4~+0.7）、DEV-2 71.1%（A 71.3%，−0.2，CI −2.5~+2.1），均不显著。回答 gemini-3.8-flash-high、判官 gpt-6.1-sol，经 模型网关。新增回答调用 323 + 358 次。台账 2 行已补，结果写进 `docs/memory-benchmark-results.md`；`bench/ledger_backfill.py` 增加 `embed_qa_B` 映射。
 - **网页读取接模型实测**（`reader_eval.py model`，11 题）：web_reader 10/11 答对、1 编造；mcp-server-fetch 9/11、0 编造；Crawl4AI 10/11、2 编造。与无模型 ceiling 的「web_reader 链接截断」结论不同，模型会直接猜目标 URL。**DeepSeek 密钥（`qqbot-data/tools/deepseek.key`）实测 401 invalid**，本轮临时改用 模型网关 的 gemini-3.8-flash-high，与 D-034 口径不同，待补有效密钥后复测。D-035 暂不升级为正式决定。
 - **视频（及所有 Gemini 调用）改走 模型网关**（用户决定，D-036）：模型网关 有 Gemini 原生接口、无 Files API；BVR（仓库外 `qqbot-data/vendor/bvr`）已改 `src/video-analysis.ts` 支持 `GEMINI_BASE_URL` + inline base64，6 秒合成视频经 MCP `analyze_video` 实测正确（8.45 s）。限制：>23 MiB 视频不能内联。
+- **准备候选深度 V2 补测**：`bench/run_depth.py` 增加 `--vectors` 参数（默认 V0 保持旧行为），下一步跑 K3/K10/K20/K30 的 V2 问答层补测。
 - 环境备注：本机 2 核 / 3.8GB 内存，跑批量模型调用时不要同时开多个重任务；磁盘当前约 80% 已用。
 
-### A-31（2026-11-07）DeepSeek 密钥修复与搜索模块改进
+### A-31（2026-11-07）补测收尾、DeepSeek 密钥修复与搜索模块改进
 
 - **DeepSeek 密钥修复**：`qqbot-data/tools/deepseek.key` 换成 dsh 凭据里的有效 key（旧 key 对 `api.deepseek.com` 返回 401）。网页读取评测恢复 D-034 的 DeepSeek 口径。
+- **候选深度 V2 补测完成（两群）**：DEV-1 K3 83.9 / K5 85.5 / K10 84.3 / K20 83.9 / K30 82.5；DEV-2 70.6 / 71.3 / 71.1 / 69.7 / 68.4。**K5 在两个群都仍是第一**，D-028 的深度选择不需要改；K30 在 DEV-2 上显著变差。台账 +10 行，结果写进 `docs/memory-benchmark-results.md`（旧结果另存 `depth.V0.json`，`depth_V2.json` 为新补测）。
 - **web_reader 0.2.0**（`plugins/astrbot_plugin_web_reader/`）：正文区链接优先（`article`/`main` 再补整页）、链接上限 60→150、新增 `links_offset` 分页与 `links_more`/`links_next`、工具说明加「引用原文前必须确认它出现在返回内容里」。新增 5 项单元测试（`tests/bench/test_web_reader.py`，全仓 106 项通过）。
 - **评测判定修正**：`reader_eval.py` 的「编造」从「整段原文逐字匹配」改为「5 字符片段覆盖率 <0.5 才算编造」，修掉列表拼接/标点差异造成的假阳性；旧结果保留，新结果 `model2_ds.*.json`。
 - **DeepSeek 口径三读取器打平**：11 题模型版 web_reader / mcp-server-fetch / Crawl4AI 都是 10/11；编造 0 / 0 / 1；平均 3.5 / 10.2 / 11.9 秒。**不引入 Crawl4AI 作为默认读取器**（D-037），Playwright MCP 留给需要点击/登录态的页面。
+- 后续（未做）：真实场景（梗、百科、文档站）扩大样本；候选打包 E1–E4 与向量组 V/DV/DVq 的 V2 补测脚本已就绪（`--vectors/--experiment`），待跑；事件打标等用户交回。
+
+
+### A-32（2026-11-08）DSH 测试会话落地与梗表更新闭环
+
+- **测试会话**：DSH preset `test`（「测试（搜索+记忆）」）。系统提示由 `persona-botname.mjs` 拼装：`~/.dsh/profiles/web/persona-botname.md`（<BOT_NAME>人设与规则，用户可改）+ `qqbot-data/store/memory_snapshot.md`（人物/梗快照，常注入）。工具只有 `search_web`、`fetch_page`、`memory_context`、`memory_search`。
+- **工具输出修复**：DSH 按 `output.schema` 投影工具返回值，原 schema 未声明字段时结果被裁成 `{}`（会话记录里 `memory_context` 返回 `{}`、`memory_search` 只剩 `{"query":...}`），模型因此“搜不到”。四个工具改为返回 `{text}` 包装并在 schema 声明。
+- **梗表更新闭环**（`scripts/memory/term_candidates.py`）：`extract`（从会话工具查询词抽候选，过滤已知/停用词）→ `list` → `confirm`（写入 memory.db 的 term/term_sense，`source_table=session:<id>`）或 `reject` → `rebuild`（重新生成快照）。`build_snapshot.py` 现在合并 DB 中已确认词条（chat code `general` 为通用层，其余为本群层，DB 覆盖同名标注）。
+- **验证**：确认「奶蛙」（通用层，含义：奶龙 AI 生成失败图衍生的表情包）后，快照通用梗 56 → 57 条，`memory_snapshot.md` 第 75 行出现该词条；其余 6 条噪声候选已 reject，剩 1 条「星紗」待判定。
+- **限制**：候选抽取基于查询词，人名/产品名等噪声需人工 reject；快照更新需重启一次（冷前缀）；“尾部增量注入”（不重启）尚未做。
+
+### A-33（2026-11-08）测试会话修复、梗表自动入表、交接准备
+
+- **DSH 工具输出修复**：`output.schema` 未声明字段会被投影成 `{}`，模型因此“搜不到星纱”；`web-tools.mjs` / `memory-tools.mjs` 四个工具改为 `{text}` 包装。
+- **搜索确认即入表**（D-039 补记）：`term_candidates.py extract` 对 `search_web` 结果含梗信号（梗/meme/表情包/抽象/网络用语/流行/网红/二创/玩梗）的候选，直接写 `term`（status=confirmed，来源 `search:<session>`），**不过频率门槛、不等人工确认**；其余候选仍走人工 confirm/reject。合成会话验证通过。
+- **当前梗表**：通用层 57 条（含「奶蛙」）、本群层 15 条；人物 11 人。
+- **测试会话**：`19d53a84` 可继续（恢复按当前 profile 挂载）；`10a6e6b0` 的 memory-test preset 已删，建议弃用。
+- **交接文档**：`docs/handover-2026-11-08.md`（仓库外配置、会话状态、未完成项、注意事项）。
