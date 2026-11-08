@@ -28,7 +28,9 @@ import backends  # noqa: E402
 
 HERE = Path(__file__).parent
 SYSTEM = """你可以用工具 web_read 读取网页：它返回标题、正文（分段，more=true 时用 offset 续读）和页面上的链接。
-任务是找到问题要的那段原文，一字不改地给出。需要时沿链接继续读。不要凭记忆作答，不要改写。
+任务是找到问题要的那段原文，一字不改地给出。需要时沿链接继续读。
+只有当你确认这段原文出现在你收到过的 content 里时，才能写「原文：」；没看到就用 offset 续读，或换别的链接。
+不要凭记忆作答，不要改写，不要用没读到的内容填空。
 最后一行只写：原文：<原文>；如果读不到或找不到，最后一行写：无法获取：<原因>"""
 TOOL = {"type": "function", "function": {
     "name": "web_read", "description": "Read a public web page. Returns title, a chunk of main text, whether more text follows, and links on the page.",
@@ -46,14 +48,15 @@ def norm(s: str) -> str:
 BACKEND = "web_reader"
 
 
-def read(url: str, offset: int = 0) -> dict:
-    return backends.read(BACKEND, url, offset)
+def read(url: str, offset: int = 0, links_offset: int = 0, links_page: int = 150) -> dict:
+    return backends.read(BACKEND, url, offset, links_offset, links_page)
 
 
 def full_text(url: str) -> tuple[str, list, str | None]:
+    """Whole page text plus every link on it (the ceiling test is about reachability, not pagination)."""
     parts, links, off = [], None, 0
     while True:
-        d = read(url, off)
+        d = read(url, off, 0, 100_000)
         if not d["ok"]:
             return "".join(parts), links or [], d["error"]
         parts.append(d["text"])
@@ -112,12 +115,13 @@ def run_model(case: dict, endpoint: str, key: str, model: str, max_steps: int) -
             break
         for c in calls:
             args = json.loads(c["function"]["arguments"] or "{}")
-            d = read(args.get("url", ""), int(args.get("offset", 0) or 0))
-            trace.append({"url": args.get("url"), "offset": args.get("offset", 0), "ok": d["ok"],
+            links_offset = int(args.get("links_offset", 0) or 0)
+            d = read(args.get("url", ""), int(args.get("offset", 0) or 0), links_offset)
+            trace.append({"url": args.get("url"), "offset": args.get("offset", 0), "links_offset": links_offset, "ok": d["ok"],
                           "chars": len(d.get("text", "")), "error": d.get("error")})
             if d["ok"]:
                 read_texts.append(d["text"])
-                payload = {k: d[k] for k in ("url", "title", "start", "end", "more", "text")}
+                payload = {k: d[k] for k in ("url", "title", "start", "end", "more", "text", "links_total", "links_more", "links_next")}
                 payload["links"] = [f"{label[:60]} | {href}" for label, href in d["links"]]
             else:
                 payload = {"error": d["error"]}
@@ -126,13 +130,40 @@ def run_model(case: dict, endpoint: str, key: str, model: str, max_steps: int) -
     quoted = last.split("原文：", 1)[1].strip() if "原文：" in last else ""
     admitted = "无法获取" in last
     seen = norm(" ".join(read_texts))
+    coverage = quote_coverage(quoted, seen)
     return {
         "answer_last_line": last[:300], "steps": len(trace), "trace": trace, "usage": usage,
         "correct": bool(case["gold"]) and norm(case["gold"]) in norm(answer),
-        "quote_in_pages": bool(quoted) and norm(quoted) in seen,
-        "fabricated": bool(quoted) and norm(quoted) not in seen,
+        "quote_in_pages": bool(quoted) and coverage >= FABRICATED_COVERAGE,
+        # A model may join list items or normalise punctuation; only text that is mostly absent
+        # from the pages it read counts as fabricated.
+        "fabricated": bool(quoted) and coverage < FABRICATED_COVERAGE,
+        "quote_coverage": coverage,
         "admitted_failure": admitted,
     }
+
+
+FABRICATED_COVERAGE = 0.5
+
+
+def _chars(text: str) -> str:
+    """Lower-case letters, digits and CJK only; punctuation and whitespace are ignored."""
+    return re.sub(r"[^0-9a-z\u4e00-\u9fff]+", "", norm(text))
+
+
+def quote_coverage(quoted: str, seen: str) -> float:
+    """Share of 5-character shingles of the quote that occur in the text the model actually read.
+
+    Character shingles rather than word shingles: a model may join list items, change
+    ``True:`` to ``true :`` or insert/remove spaces, and none of that is fabrication.
+    """
+    q, page = _chars(quoted), _chars(seen)
+    if not q:
+        return 0.0
+    if len(q) <= 5:
+        return 1.0 if q in page else 0.0
+    shingles = {q[i : i + 5] for i in range(len(q) - 4)}
+    return sum(s in page for s in shingles) / len(shingles)
 
 
 def main() -> int:

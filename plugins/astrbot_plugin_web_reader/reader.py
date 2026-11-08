@@ -15,7 +15,7 @@ import requests
 from bs4 import BeautifulSoup
 
 MAX_BYTES = 2_500_000
-MAX_LINKS = 60
+MAX_LINKS = 150
 MAX_REDIRECTS = 5
 DEFAULT_LIMIT = 6000
 MAX_LIMIT = 12000
@@ -127,10 +127,40 @@ def _clean_lines(text: str) -> str:
     return "\n".join(line for line in lines if line)
 
 
+def _collect_links(
+    root, base_url: str, seen: set[str]
+) -> list[tuple[str, str]]:
+    """In-page http(s) links in document order, de-duplicated by URL without fragment."""
+    out: list[tuple[str, str]] = []
+    base = base_url.split("#")[0].rstrip("/")
+    for a in root.find_all("a", href=True):
+        href = urljoin(base_url, a["href"].strip())
+        parts = urlsplit(href)
+        if parts.scheme not in {"http", "https"}:
+            continue
+        key = href.split("#")[0]
+        if key.rstrip("/") == base or key in seen:
+            continue
+        seen.add(key)
+        text = " ".join(a.get_text(" ", strip=True).split()) or (parts.path or href)
+        out.append((text[:80], href))
+    return out
+
+
 def extract(
-    html: bytes, url: str, offset: int = 0, limit: int = DEFAULT_LIMIT
+    html: bytes,
+    url: str,
+    offset: int = 0,
+    limit: int = DEFAULT_LIMIT,
+    links_offset: int = 0,
+    links_limit: int = MAX_LINKS,
 ) -> dict:
-    """Extract title, cleaned main text (chunked) and in-page links."""
+    """Extract title, cleaned main text (chunked) and in-page links.
+
+    Links inside the page's main content come first, then the rest of the page, so a
+    navigation-heavy header cannot push the article links out of the list. Links are
+    paginated with ``links_offset``/``links_limit`` and the caller is told when more remain.
+    """
     soup = BeautifulSoup(html, "lxml")
     title = ""
     if soup.title and soup.title.get_text(strip=True):
@@ -138,23 +168,13 @@ def extract(
     elif soup.find("meta", property="og:title"):
         title = soup.find("meta", property="og:title").get("content", "")
 
-    links: list[tuple[str, str]] = []
+    body = soup.body or soup
+    content_region = soup.find("article") or soup.find("main")
     seen: set[str] = set()
-    for a in soup.find_all("a", href=True):
-        href = urljoin(url, a["href"].strip())
-        parts = urlsplit(href)
-        if parts.scheme not in {"http", "https"}:
-            continue
-        if href.split("#")[0].rstrip("/") == url.split("#")[0].rstrip("/"):
-            continue
-        text = " ".join(a.get_text(" ", strip=True).split()) or (parts.path or href)
-        key = href.split("#")[0]
-        if key in seen:
-            continue
-        seen.add(key)
-        links.append((text[:80], href))
-        if len(links) >= MAX_LINKS:
-            break
+    links: list[tuple[str, str]] = []
+    if content_region is not None:
+        links.extend(_collect_links(content_region, url, seen))
+    links.extend(_collect_links(body, url, seen))
 
     for tag in soup(
         ["script", "style", "noscript", "iframe", "svg", "form", "nav", "header", "footer", "aside"]
@@ -168,6 +188,15 @@ def extract(
     offset = max(0, min(int(offset), total))
     limit = max(500, min(int(limit), MAX_LIMIT))
     end = min(total, offset + limit)
+
+    links_total = len(links)
+    lo = max(0, min(int(links_offset), links_total))
+    if links_limit is None:
+        shown = links[lo:]
+    else:
+        ll = max(1, min(int(links_limit), MAX_LINKS))
+        shown = links[lo : lo + ll]
+    links_more = lo + len(shown) < links_total
     return {
         "url": url,
         "title": title,
@@ -176,7 +205,11 @@ def extract(
         "end": end,
         "more": end < total,
         "text": text[offset:end],
-        "links": links,
+        "links": shown,
+        "links_total": links_total,
+        "links_start": lo,
+        "links_more": links_more,
+        "links_next": lo + len(shown) if links_more else None,
     }
 
 
@@ -190,7 +223,12 @@ def format_result(data: dict) -> str:
         ),
         "--- content ---",
         data["text"] or "(empty)",
-        f"--- links ({len(data['links'])}) ---",
     ]
+    total = data.get("links_total", len(data["links"]))
+    start = data.get("links_start", 0)
+    hint = ""
+    if data.get("links_more"):
+        hint = f"; call again with links_offset={data['links_next']} for more"
+    head.append(f"--- links ({len(data['links'])} of {total} total, from {start}{hint}) ---")
     body = [f"- {text} | {href}" for text, href in data["links"]]
     return "\n".join(head + body)
