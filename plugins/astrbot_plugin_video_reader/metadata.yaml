@@ -1,0 +1,4 @@
+name: astrbot_plugin_video_reader
+desc: 看视频：下载（yt-dlp）、压缩、按内联上限切片后逐段交给 Gemini（gateway 原生接口），合并成带原视频时间的回答。
+author: qqbot
+version: 0.1.0
