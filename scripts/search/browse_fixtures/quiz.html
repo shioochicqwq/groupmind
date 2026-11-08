@@ -1,0 +1,25 @@
+<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>测测你是哪种猫</title><script src="common.js"></script></head>
+<body><main><h1>测测你是哪种猫</h1><div id="q"></div><div id="result" hidden></div></main>
+<script>
+// Branching: the next question depends on the previous answer.
+const Q = {
+  start: {text: '周末你更想？', opts: [['出门找朋友玩', 'social'], ['在家睡一整天', 'home']]},
+  social: {text: '朋友迟到半小时，你会？', opts: [['先去逛逛', 'r:橘猫'], ['发消息催', 'r:暹罗猫']]},
+  home: {text: '下雨天窗边有只鸟，你会？', opts: [['盯着看一下午', 'r:布偶猫'], ['拉上窗帘继续睡', 'home2']]},
+  home2: {text: '醒来发现饭没了，你会？', opts: [['点外卖', 'r:英短'], ['饿着继续睡', 'r:加菲猫']]},
+};
+let path = [];
+function show(id) {
+  const n = Q[id]; q.innerHTML = '<p>' + n.text + '</p>';
+  n.opts.forEach(([label, next]) => {
+    const b = document.createElement('button'); b.textContent = label;
+    b.onclick = () => { path.push(label); next.startsWith('r:') ? finish(next.slice(2)) : show(next); };
+    q.appendChild(b);
+  });
+}
+function finish(cat) {
+  q.hidden = true; result.hidden = false; log('result', {cat, path});
+  result.innerHTML = '<h2>你是：' + cat + '</h2><p>结果编号：' + code(cat + path.join('>')) + '</p>';
+}
+show('start');
+</script></body></html>

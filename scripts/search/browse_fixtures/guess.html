@@ -1,0 +1,14 @@
+<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>猜数字</title><script src="common.js"></script></head>
+<body><main><h1>猜数字（1~100）</h1>
+<label>你的猜测 <input id="g" type="number"></label> <button onclick="guess()">猜</button>
+<p id="fb" role="status">还没开始</p><p>已猜次数：<span id="n">0</span></p></main>
+<script>
+const secret = 37 + (new Date().getUTCDate() % 7) * 7; let tries = 0;
+function guess() {
+  const x = parseInt(g.value, 10); if (!(x >= 1 && x <= 100)) { fb.textContent = '请输入 1~100 的整数'; return; }
+  tries++; n.textContent = tries; log('guess', {x});
+  if (x < secret) fb.textContent = x + ' 太小了'; else if (x > secret) fb.textContent = x + ' 太大了';
+  else { fb.textContent = '猜对了！通关码：' + code('guess' + secret); log('win', {tries}); }
+}
+g.addEventListener('keydown', e => { if (e.key === 'Enter') guess(); });
+</script></body></html>

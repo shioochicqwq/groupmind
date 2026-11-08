@@ -1,0 +1,45 @@
+<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>社团活动问卷</title><script src="common.js"></script></head>
+<body><main>
+<h1>社团活动问卷</h1>
+<section id="p1"><h2>第 1 页 / 共 3 页</h2>
+  <label>你的昵称 <input id="nick" name="nick"></label>
+  <fieldset><legend>你最常参加哪类活动？</legend>
+    <label><input type="radio" name="kind" value="桌游">桌游</label>
+    <label><input type="radio" name="kind" value="徒步">徒步</label>
+    <label><input type="radio" name="kind" value="观影">观影</label>
+  </fieldset>
+  <button onclick="go(2)">下一页</button></section>
+<section id="p2" hidden><h2>第 2 页 / 共 3 页</h2>
+  <fieldset><legend>哪些时间方便？（可多选）</legend>
+    <label><input type="checkbox" name="t" value="周五晚">周五晚</label>
+    <label><input type="checkbox" name="t" value="周六下午">周六下午</label>
+    <label><input type="checkbox" name="t" value="周日上午">周日上午</label>
+  </fieldset>
+  <label>每月预算 <select id="budget"><option value="">请选择</option><option>50 元以下</option><option>50-100 元</option><option>100 元以上</option></select></label>
+  <button onclick="go(1)">上一页</button> <button onclick="go(3)">下一页</button></section>
+<section id="p3" hidden><h2>第 3 页 / 共 3 页</h2>
+  <label>一句话建议 <textarea id="advice"></textarea></label>
+  <button onclick="go(2)">上一页</button> <button onclick="submitForm()">提交</button></section>
+<section id="done" hidden><h2>提交成功</h2><p>你的回执码：<strong id="rcpt"></strong></p></section>
+<p id="err" role="alert"></p>
+</main>
+<script>
+function val() {
+  return {nick: nick.value.trim(), kind: (document.querySelector('[name=kind]:checked') || {}).value || '',
+    t: [...document.querySelectorAll('[name=t]:checked')].map(x => x.value).sort().join('+'),
+    budget: budget.value, advice: advice.value.trim()};
+}
+function go(n) {
+  const v = val(); err.textContent = '';
+  if (n === 2 && (!v.nick || !v.kind)) { err.textContent = '请填写昵称并选择活动类型'; return; }
+  if (n === 3 && (!v.t || !v.budget)) { err.textContent = '请至少选一个时间并选择预算'; return; }
+  for (const id of ['p1', 'p2', 'p3']) document.getElementById(id).hidden = id !== 'p' + n;
+}
+function submitForm() {
+  const v = val();
+  if (!v.advice) { err.textContent = '请填写建议'; return; }
+  log('submit', v);
+  for (const id of ['p1', 'p2', 'p3']) document.getElementById(id).hidden = true;
+  done.hidden = false; rcpt.textContent = code([v.nick, v.kind, v.t, v.budget].join('|'));
+}
+</script></body></html>

@@ -71,3 +71,31 @@ def test_format_result_mentions_links_more():
     d = r.extract(_html(nav=0, body=0, tail=200), "https://example.com/")
     text = r.format_result(d)
     assert "links_offset=" in text
+
+
+def test_bot_wall_detection():
+    r = _reader()
+    assert r.is_wall(403, b"<title>Just a moment...</title>")
+    assert r.is_wall(200, b"<html>Performing security verification</html>")
+    assert r.is_wall(429, b"")
+    assert not r.is_wall(200, b"<html><title>ok</title><p>hello</p></html>")
+
+
+def _browser():
+    import sys
+    spec = importlib.util.spec_from_file_location("web_reader_plugin_browser", PLUGIN.with_name("browser.py"))
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module  # dataclasses look the module up
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_browser_requests_stay_public():
+    b = _browser()
+    assert not b.request_allowed("http://127.0.0.1:8317/v1/models")
+    assert not b.request_allowed("http://10.0.0.5/")
+    assert not b.request_allowed("http://[::1]/")
+    assert not b.request_allowed("file:///etc/passwd")
+    assert not b.request_allowed("https://user:pw@example.com/")
+    assert b.request_allowed("data:text/plain,hi")
+    assert b.request_allowed("http://127.0.0.1:9/", frozenset({"127.0.0.1"}))  # test fixture escape hatch only

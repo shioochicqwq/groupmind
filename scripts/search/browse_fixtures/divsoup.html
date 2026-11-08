@@ -1,0 +1,23 @@
+<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>口味调查</title><script src="common.js"></script>
+<style>.opt{display:inline-block;padding:6px 12px;border:1px solid #999;margin:4px;cursor:pointer}.opt.on{background:#9cf}
+.dd{position:relative;display:inline-block;border:1px solid #999;padding:4px 10px;cursor:pointer}.dd-list{display:none;position:absolute;background:#fff;border:1px solid #999}
+.dd.open .dd-list{display:block}.dd-item{padding:4px 10px}.btn{display:inline-block;background:#36c;color:#fff;padding:6px 16px;cursor:pointer;margin-top:12px}</style></head>
+<body><div class="wrap"><div class="h">口味调查</div>
+<!-- Built like many real survey sites: no <button>, no <select>, no roles; just divs with click handlers. -->
+<div class="q">1. 甜豆花还是咸豆花？</div>
+<div class="opt" data-q="a" data-v="甜">甜豆花</div><div class="opt" data-q="a" data-v="咸">咸豆花</div>
+<div class="q">2. 粽子你吃什么馅？</div>
+<div class="dd" id="dd"><span id="ddv">点击选择</span><div class="dd-list">
+  <div class="dd-item" data-v="豆沙">豆沙</div><div class="dd-item" data-v="鲜肉">鲜肉</div><div class="dd-item" data-v="蛋黄">蛋黄</div></div></div>
+<div class="q">3. 辣度（1~5）</div>
+<div class="opt" data-q="c" data-v="1">1</div><div class="opt" data-q="c" data-v="3">3</div><div class="opt" data-q="c" data-v="5">5</div>
+<div><div class="btn" id="go">提交</div></div><div id="msg"></div></div>
+<script>
+const ans = {a: '', b: '', c: ''};
+document.querySelectorAll('.opt').forEach(o => o.onclick = () => {
+  document.querySelectorAll('.opt[data-q=' + o.dataset.q + ']').forEach(x => x.classList.remove('on'));
+  o.classList.add('on'); ans[o.dataset.q === 'a' ? 'a' : 'c'] = o.dataset.v; });
+dd.onclick = e => { if (e.target.classList.contains('dd-item')) { ans.b = e.target.dataset.v; ddv.textContent = ans.b; dd.classList.remove('open'); } else dd.classList.toggle('open'); };
+go.onclick = () => { if (!ans.a || !ans.b || !ans.c) { msg.textContent = '还有题没答'; return; }
+  log('submit', ans); msg.textContent = '感谢参与！回执码：' + code(ans.a + ans.b + ans.c); };
+</script></body></html>

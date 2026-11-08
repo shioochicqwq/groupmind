@@ -1,0 +1,11 @@
+<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>按顺序点数字</title><script src="common.js"></script></head>
+<body><main><h1>按 1 到 9 的顺序点击数字</h1><div id="grid"></div><p id="st" role="status">下一个：1</p></main>
+<script>
+const nums = [7, 3, 9, 1, 5, 8, 2, 6, 4]; let next = 1, wrong = 0;
+nums.forEach(k => { const b = document.createElement('button'); b.textContent = k; b.onclick = () => hit(k, b); grid.appendChild(b); });
+function hit(k, b) {
+  if (k === next) { b.disabled = true; next++; st.textContent = next > 9 ? '完成！通关码：' + code('order' + wrong) : '下一个：' + next;
+    if (next > 9) log('win', {wrong}); }
+  else { wrong++; next = 1; grid.querySelectorAll('button').forEach(x => x.disabled = false); st.textContent = '点错了，从 1 重新开始'; log('wrong', {k}); }
+}
+</script></body></html>

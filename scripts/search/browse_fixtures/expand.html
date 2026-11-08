@@ -1,0 +1,10 @@
+<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>公告：活动改期</title><script src="common.js"></script></head>
+<body><main><article><h1>公告：秋季活动改期</h1>
+<p>因场地原因，原定的秋季活动需要调整。具体安排见全文。</p>
+<button onclick="more()">展开全文</button><div id="full"></div></article></main>
+<script>
+function more() { // content arrives only after the click, like lazy-loaded posts
+  log('expand', {});
+  setTimeout(() => { full.innerHTML = '<p>新的时间是十一月二十二日下午三点，地点改到东区二号楼的天台花园，请带好雨具。</p>'; }, 500);
+}
+</script></body></html>
