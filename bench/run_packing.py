@@ -16,6 +16,7 @@ from bench.embed import AliyunEmbedder, VectorIndex
 from bench.memory_text import raw_blocks
 from bench.retrievers import packing
 from bench.run_abcd import Arm, evaluate_arm, prepare
+from bench.run_embed_ablation import CONFIGS
 from bench.run_vector import EMBED_CHARS
 from bench.schema import Visibility
 
@@ -31,13 +32,17 @@ def main() -> int:
     ap.add_argument("--absent", type=int, default=150)
     ap.add_argument("--workers", type=int, default=8)
     ap.add_argument("--budget", type=int, default=1500)
+    ap.add_argument("--vectors", default="V0", help="embedding config from bench.run_embed_ablation.CONFIGS (V0 = the 2026-11-04 run)")
+    ap.add_argument("--experiment", default="packing", help="result file, raw folder and ledger section name; use packing_V2 for the V2 re-run")
     args = ap.parse_args()
     if realdata.splits()[args.group] is not Visibility.DEV:
         raise SystemExit("this run sends data out and is DEV only")
 
     ctx = prepare(args)
     by_id, channel, b = ctx.by_id, ctx.channel, args.budget
-    embedder = AliyunEmbedder(args.out / "embed.aliyun.cache.jsonl")
+    vec_conf = CONFIGS[args.vectors]
+    embedder = AliyunEmbedder(args.out / f"embed.ablation.{vec_conf['model']}.{vec_conf['dim']}.cache.jsonl",
+                              vec_conf["model"], vec_conf["dim"], vec_conf["asymmetric"], vec_conf["instruct"])
     vec_summary = VectorIndex(ctx.summary_blocks, embedder, "向量|摘要")
     vec_raw = VectorIndex(
         [x.__class__(x.block_id, x.msg_ids, x.end_ts, x.channel, ("\n".join(raw_blocks([x], by_id)) or " ")[:EMBED_CHARS],
@@ -80,11 +85,12 @@ def main() -> int:
         (q, q["first_ts"], False) for q in questions if q["id"] in absent_ids]
     report: dict = {"group": args.group, "questions": len(questions), "absent_questions": len(absent_ids), "arms": {},
                     "route_depth": ROUTE_DEPTH, "embedding": {"model": embedder.model, "dim": embedder.dim}}
+    report_path = args.out / f"{args.experiment}.json"
     llms = (ctx.fast_llm, ctx.main_llm, ctx.judge_llm)
     for arm in arms:
-        report["arms"][arm.name] = evaluate_arm(arm, conditions, llms, ctx.awkward, rawlog.arm_file(args.out, "packing", arm.name))
+        report["arms"][arm.name] = evaluate_arm(arm, conditions, llms, ctx.awkward, rawlog.arm_file(args.out, args.experiment, arm.name))
         print(arm.name, {k: v for k, v in report["arms"][arm.name].items() if k not in ("rows", "conditions")}, flush=True)
-        (args.out / "packing.json").write_text(json.dumps(report, ensure_ascii=False, indent=1), encoding="utf-8")
+        report_path.write_text(json.dumps(report, ensure_ascii=False, indent=1), encoding="utf-8")
 
     def correct(name):
         return {r["id"]: float(r["correct"]) for r in report["arms"][name]["rows"] if r["visible"]}
@@ -100,12 +106,12 @@ def main() -> int:
         four, two = f"{kind}:{names[kind]}4@{b}", f"{kind}:{names[kind]}2@{b}"
         pairs[f"{four} vs {two}"] = metrics.paired_delta([correct(two)[i] for i in ids], [correct(four)[i] for i in ids])
     report["paired"] = pairs
-    (args.out / "packing.json").write_text(json.dumps(report, ensure_ascii=False, indent=1), encoding="utf-8")
-    usage.write(args.out / "usage.packing.json", "E 打包与保底")
+    report_path.write_text(json.dumps(report, ensure_ascii=False, indent=1), encoding="utf-8")
+    usage.write(args.out / f"usage.{args.experiment}.json", "E 打包与保底")
     from bench import ledger
     from bench.ledger_backfill import abcd
 
-    ledger.append(args.out.parent / "ledger.jsonl", abcd(args.out.parent, args.out.name, "packing"))
+    ledger.append(args.out.parent / "ledger.jsonl", abcd(args.out.parent, args.out.name, args.experiment))
     print("done")
     return 0
 
