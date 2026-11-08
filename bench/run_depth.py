@@ -19,6 +19,7 @@ from bench.embed import AliyunEmbedder, VectorIndex
 from bench.memory_text import raw_blocks
 from bench.retrievers import packing
 from bench.run_abcd import ANSWER, JUDGE, Arm, build_inputs, evaluate_arm, prepare
+from bench.run_embed_ablation import CONFIGS
 from bench.run_vector import EMBED_CHARS
 from bench.schema import Visibility
 
@@ -35,7 +36,7 @@ def history(out: Path) -> dict[str, str]:
     """Answer-prompt hash -> the first earlier experiment/arm that sent that exact prompt."""
     seen: dict[str, str] = {}
     for path in sorted((out / "raw").glob("*/*.jsonl")):
-        if path.parent.name == "depth":
+        if path.parent.name.startswith("depth"):
             continue
         for line in path.open(encoding="utf-8"):
             r = json.loads(line)
@@ -54,6 +55,8 @@ def main() -> int:
     ap.add_argument("--absent", type=int, default=150)
     ap.add_argument("--workers", type=int, default=8)
     ap.add_argument("--budget", type=int, default=1500)
+    ap.add_argument("--vectors", default="V0", help="embedding config from bench.run_embed_ablation.CONFIGS (V0 = the 2026-11-04 run)")
+    ap.add_argument("--experiment", default="depth", help="result file, raw folder and ledger section name; use depth_V2 for the V2 re-run")
     ap.add_argument("--scan-only", action="store_true", help="report cache hits and stop before any model call")
     args = ap.parse_args()
     if realdata.splits()[args.group] is not Visibility.DEV:
@@ -61,7 +64,9 @@ def main() -> int:
 
     ctx = prepare(args)
     by_id, channel, b = ctx.by_id, ctx.channel, args.budget
-    embedder = AliyunEmbedder(args.out / "embed.aliyun.cache.jsonl")
+    vec_conf = CONFIGS[args.vectors]
+    embedder = AliyunEmbedder(args.out / f"embed.ablation.{vec_conf['model']}.{vec_conf['dim']}.cache.jsonl",
+                              vec_conf["model"], vec_conf["dim"], vec_conf["asymmetric"], vec_conf["instruct"])
 
     def offline(*_a, **_k):
         raise RuntimeError("embedding cache miss: this experiment must not call the embedding API")
@@ -120,7 +125,8 @@ def main() -> int:
     report: dict = {"group": args.group, "questions": len(questions), "absent_questions": len(absent_ids),
                     "depths": list(DEPTHS), "scan": scan, "arms": {},
                     "embedding": {"model": embedder.model, "dim": embedder.dim}}
-    (args.out / "depth.json").write_text(json.dumps(report, ensure_ascii=False, indent=1), encoding="utf-8")
+    report_path = args.out / f"{args.experiment}.json"
+    report_path.write_text(json.dumps(report, ensure_ascii=False, indent=1), encoding="utf-8")
     if args.scan_only:
         return 0
 
@@ -128,21 +134,21 @@ def main() -> int:
     usage.reset()
     llms = (ctx.fast_llm, main_llm, judge_llm)
     for k, arm in arms.items():
-        report["arms"][arm.name] = evaluate_arm(arm, conditions, llms, ctx.awkward, rawlog.arm_file(args.out, "depth", arm.name))
+        report["arms"][arm.name] = evaluate_arm(arm, conditions, llms, ctx.awkward, rawlog.arm_file(args.out, args.experiment, arm.name))
         print(arm.name, {x: y for x, y in report["arms"][arm.name].items() if x not in ("rows", "conditions")}, flush=True)
-        (args.out / "depth.json").write_text(json.dumps(report, ensure_ascii=False, indent=1), encoding="utf-8")
+        report_path.write_text(json.dumps(report, ensure_ascii=False, indent=1), encoding="utf-8")
 
     # 4. Merge: statistics, cost and mechanisms.
     spent = usage.summary()
     report["cost"] = {arm.name: {role: spent[role] for role in spent if role.endswith("|" + arm.name)} for arm in arms.values()}
     report["paired"] = paired(report, arms, b)
     report["mechanism"] = mechanism(conditions, routes, arms, inputs, report, by_id)
-    (args.out / "depth.json").write_text(json.dumps(report, ensure_ascii=False, indent=1), encoding="utf-8")
-    usage.write(args.out / "usage.depth.json", "K 候选深度")
+    report_path.write_text(json.dumps(report, ensure_ascii=False, indent=1), encoding="utf-8")
+    usage.write(args.out / f"usage.{args.experiment}.json", "K 候选深度")
     from bench import ledger
     from bench.ledger_backfill import abcd
 
-    ledger.append(args.out.parent / "ledger.jsonl", abcd(args.out.parent, args.out.name, "depth"))
+    ledger.append(args.out.parent / "ledger.jsonl", abcd(args.out.parent, args.out.name, args.experiment))
     print("done")
     return 0
 

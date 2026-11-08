@@ -34,6 +34,8 @@ def main() -> int:
     ap.add_argument("--budget", type=int, default=1500)
     ap.add_argument("--embedder", choices=("aliyun", "gemini"), default="aliyun")
     ap.add_argument("--embed-model", default="qwen3.7-text-embedding-flash")
+    ap.add_argument("--vectors", default="", help="V2 / M1 etc. from CONFIGS; empty keeps the old --embedder/--embed-model path")
+    ap.add_argument("--experiment", default="vector", help="result file, raw folder and ledger section name; use vector_V2 for the V2 re-run")
     args = ap.parse_args()
     if realdata.splits()[args.group] is not Visibility.DEV:
         raise SystemExit("this run sends data out and is DEV only")
@@ -42,8 +44,15 @@ def main() -> int:
 
     ctx = prepare(args)
     channel, by_id = ctx.channel, ctx.by_id
-    embedder = (AliyunEmbedder(args.out / "embed.aliyun.cache.jsonl", args.embed_model) if args.embedder == "aliyun"
-                else Embedder(args.out / "embed.cache.jsonl"))
+    if args.vectors:
+        from bench.run_embed_ablation import CONFIGS  # local: that module imports EMBED_CHARS from here
+
+        vec_conf = CONFIGS[args.vectors]
+        embedder = AliyunEmbedder(args.out / f"embed.ablation.{vec_conf['model']}.{vec_conf['dim']}.cache.jsonl",
+                                  vec_conf["model"], vec_conf["dim"], vec_conf["asymmetric"], vec_conf["instruct"])
+    else:
+        embedder = (AliyunEmbedder(args.out / "embed.aliyun.cache.jsonl", args.embed_model) if args.embedder == "aliyun"
+                    else Embedder(args.out / "embed.cache.jsonl"))
     vec_summary = VectorIndex(ctx.summary_blocks, embedder, "向量|摘要")
     vec_raw = VectorIndex(
         [b.__class__(b.block_id, b.msg_ids, b.end_ts, b.channel, ("\n".join(raw_blocks([b], by_id)) or " ")[:EMBED_CHARS], b.labels)
@@ -79,11 +88,12 @@ def main() -> int:
 
     report: dict = {"group": args.group, "questions": len(questions), "absent_questions": len(absent_ids), "arms": {},
                     "embedding": {"model": embedder.model, "dim": embedder.dim}}
+    report_path = args.out / f"{args.experiment}.json"
     for arm in arms:
         report["arms"][arm.name] = evaluate_arm(arm, conditions, (ctx.fast_llm, ctx.main_llm, ctx.judge_llm), ctx.awkward,
-                                                rawlog.arm_file(args.out, "vector", arm.name))
+                                                rawlog.arm_file(args.out, args.experiment, arm.name))
         print(arm.name, {k: v for k, v in report["arms"][arm.name].items() if k not in ("rows", "conditions")}, flush=True)
-        (args.out / "vector.json").write_text(json.dumps(report, ensure_ascii=False, indent=1), encoding="utf-8")
+        report_path.write_text(json.dumps(report, ensure_ascii=False, indent=1), encoding="utf-8")
 
     def correct(name):
         return {r["id"]: float(r["correct"]) for r in report["arms"][name]["rows"] if r["visible"]}
@@ -94,12 +104,12 @@ def main() -> int:
         f"{n} vs {ref}": metrics.paired_delta([correct(ref)[i] for i in ids], [correct(n)[i] for i in ids])
         for ref in (base, f"ref:win10@{b}") for n in report["arms"] if n != ref
     }
-    (args.out / "vector.json").write_text(json.dumps(report, ensure_ascii=False, indent=1), encoding="utf-8")
-    usage.write(args.out / "usage.vector.json", "I4 向量检索")
+    report_path.write_text(json.dumps(report, ensure_ascii=False, indent=1), encoding="utf-8")
+    usage.write(args.out / f"usage.{args.experiment}.json", "I4 向量检索")
     from bench import ledger
     from bench.ledger_backfill import abcd
 
-    ledger.append(args.out.parent / "ledger.jsonl", abcd(args.out.parent, args.out.name, "vector"))
+    ledger.append(args.out.parent / "ledger.jsonl", abcd(args.out.parent, args.out.name, args.experiment))
     print("done")
     return 0
 

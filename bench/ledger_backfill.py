@@ -277,7 +277,11 @@ def abcd(runs: Path, folder: str = "real-dev", name: str = "abcd") -> list[dict]
     abcd_usage = usage_of(runs / folder, name)
     title = {"abcd": "R4/I3 检索对象 × 交给模型", "vector": "I4 向量检索（1500 字）", "packing": "E 打包与保底（1500 字）",
              "depth": "K 候选深度（E1，1500 字）",
+             "depth_V2": "K 候选深度（E1，1500 字；向量 V2 补测，2026-11-07）",
+             "packing_V2": "E 打包与保底（1500 字；向量 V2 补测，2026-11-07）",
+             "vector_V2": "I4 向量检索（1500 字；向量 V2 补测，2026-11-07）",
              "embed_qa": "I5 向量配置（问答层，冻结版框架）",
+             "embed_qa_B": "I5 向量配置问答层补测（B 去重不合并，D-032；2026-11-07）",
              "color_fix": "C 上色修正 merged-v1（冻结版 V2；与此前实验条件不同）"}[name]
     for arm_name, a in r["arms"].items():
         from bench.run_abcd import arm_conditions
@@ -297,5 +301,5 @@ def abcd(runs: Path, folder: str = "real-dev", name: str = "abcd") -> list[dict]
 def backfill(runs: Path) -> list[dict]:
     labels = runs.parent / "labels" / "round1" / "merged.json"
     costs = cost_rows(runs / "real-dev", "DEV-1") + cost_rows(runs / "real-dev2", "DEV-2")
-    tables = [abcd(runs, f, n) for f in ("real-dev", "real-dev2") for n in ("abcd", "vector", "packing", "depth", "embed_qa", "color_fix")]
+    tables = [abcd(runs, f, n) for f in ("real-dev", "real-dev2") for n in ("abcd", "vector", "packing", "packing_V2", "depth", "depth_V2", "embed_qa", "embed_qa_B", "color_fix")]
     return gmb(runs) + q1(runs) + q2(runs, labels) + k(runs) + sum(tables, []) + costs

@@ -48,9 +48,13 @@ class Mapper:
 
 
 def import_group(con: sqlite3.Connection, mapper: Mapper, code: str, run_dir: Path) -> dict:
-    """One group: chat, persons, messages, colour runs and colours, and term tables if any."""
-    if realdata.splits().get(code) is not Visibility.DEV:
-        raise SystemExit(f"{code} is not a DEV group; frozen groups are not imported during research")
+    """One group: chat, persons, messages, colour runs and colours, and term tables if any.
+
+    FROZEN groups stay excluded; the memory-experience session may import every other group,
+    including VALIDATION and groups without a research run folder (messages only, no colours).
+    """
+    if realdata.splits().get(code) is Visibility.FROZEN:
+        raise SystemExit(f"{code} is a FROZEN group; frozen groups are not imported")
     from bench.sanitize import Sanitizer
 
     messages = realdata.load_group(code)
@@ -213,10 +217,19 @@ def main() -> int:
                     (time.strftime("%Y-%m-%d %H:%M"), json.dumps(code_version()), json.dumps(inputs)))
         con.commit()
         args.map.parent.mkdir(parents=True, exist_ok=True)
+        merged: dict[tuple, dict] = {}
+        if args.map.exists():
+            for line in args.map.read_text(encoding="utf-8").splitlines():
+                if not line.strip():
+                    continue
+                r = json.loads(line)
+                merged[(r["kind"], r["chat"], r["scope"], r["old"])] = r
+        for r in mapper.rows:
+            merged[(r["kind"], r["chat"], r["scope"], r["old"])] = r
         with args.map.open("w", encoding="utf-8") as f:
-            for r in mapper.rows:
+            for r in merged.values():
                 f.write(json.dumps(r, ensure_ascii=False) + "\n")
-        print(json.dumps({"stats": stats, "id_map_rows": len(mapper.rows)}, ensure_ascii=False))
+        print(json.dumps({"stats": stats, "id_map_rows": len(merged), "new_rows": len(mapper.rows)}, ensure_ascii=False))
         return 0
     results = {code: verify(con, code, Path(folder), args.labels if code == args.labels_group else None)
                for code, folder in groups.items()}
