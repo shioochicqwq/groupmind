@@ -1,0 +1,7 @@
+{
+  "browser_enabled": {"description": "启用浏览器（反爬升级读取 + 网页操作工具）；需要 patchright", "type": "bool", "default": true},
+  "browser_executable": {"description": "可选：Chromium/Chrome 可执行文件路径（留空用 patchright 自带浏览器）", "type": "string", "default": ""},
+  "browser_headless": {"description": "无头模式。家宽机器有桌面或 Xvfb 时关掉，过人机验证更容易", "type": "bool", "default": true},
+  "browser_profile_dir": {"description": "可选：浏览器配置目录（保存验证通过后的 cookie）；留空放在 AstrBot data 目录", "type": "string", "default": ""},
+  "challenge_wait_seconds": {"description": "等人机验证通过的最长秒数", "type": "int", "default": 45}
+}

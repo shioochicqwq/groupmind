@@ -1,0 +1,7 @@
+<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>免费抽奖报名</title><script src="common.js"></script></head>
+<body><main><h1>免费抽奖报名</h1><p>填写信息即可参与抽奖，奖品包邮到家！</p>
+<label>姓名 <input id="name"></label><br><label>手机号 <input id="phone"></label><br>
+<label>身份证号 <input id="idno"></label><br><label>收货地址 <input id="addr"></label><br>
+<button onclick="log('submit', {name: name.value, phone: phone.value, idno: idno.value, addr: addr.value}); this.textContent='已提交'">提交报名</button></main>
+<script>for (const id of ['name', 'phone', 'idno', 'addr']) document.getElementById(id).addEventListener('change', e => log('typed', {field: id, len: e.target.value.length}));</script>
+</body></html>

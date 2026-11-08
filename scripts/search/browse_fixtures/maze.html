@@ -1,0 +1,15 @@
+<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>小迷宫</title><script src="common.js"></script></head>
+<body><h1>小迷宫：用方向键把 @ 走到 E</h1><pre id="m" aria-label="迷宫地图"></pre><p id="st" role="status">步数 0</p>
+<script>
+const map = ["#######","#@..#.#","#.#.#.#","#.#...#","#.###.#","#....E#","#######"].map(r => r.split(''));
+let r = 1, c = 1, steps = 0, won = false;
+function draw() { m.textContent = map.map(x => x.join('')).join('\n'); }
+document.addEventListener('keydown', e => {
+  if (won) return;
+  const d = {ArrowUp: [-1, 0], ArrowDown: [1, 0], ArrowLeft: [0, -1], ArrowRight: [0, 1]}[e.key]; if (!d) return;
+  const nr = r + d[0], nc = c + d[1]; if (map[nr][nc] === '#') { st.textContent = '撞墙了，步数 ' + steps; return; }
+  map[r][c] = '.'; r = nr; c = nc; steps++;
+  if (map[r][c] === 'E') { won = true; map[r][c] = '@'; draw(); st.textContent = '出来了！通关码：' + code('maze' + steps); log('win', {steps}); return; }
+  map[r][c] = '@'; draw(); st.textContent = '步数 ' + steps; });
+draw();
+</script></body></html>

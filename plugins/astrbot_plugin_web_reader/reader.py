@@ -34,6 +34,22 @@ class FetchError(Exception):
     """Fetching the page failed (network, HTTP, size)."""
 
 
+class BotWall(FetchError):
+    """The site answered with a bot check (challenge page or 403/429/503) instead of the page."""
+
+
+WALL_MARKERS = ("Just a moment", "Performing security verification", "Attention Required",
+                "cf-chl", "challenge-platform", "Verify you are human", "DDoS-Guard",
+                     "请稍候…", "正在进行安全验证", "确认您是真人", "安全验证 - 知乎", "百度安全验证")
+
+
+def is_wall(status: int, body: bytes) -> bool:
+    head = body[:20000].decode("utf-8", "ignore")
+    if any(m in head for m in WALL_MARKERS):
+        return True
+    return status in (403, 429, 503)
+
+
 def _is_public_ip(ip: str) -> bool:
     addr = ipaddress.ip_address(ip)
     if addr.version == 6 and addr.ipv4_mapped:
@@ -107,7 +123,10 @@ def fetch(url: str) -> tuple[str, str, bytes]:
             continue
         if resp.status_code >= 400:
             code = resp.status_code
+            head = resp.raw.read(20000, decode_content=True) if code in (403, 429, 503) else b""
             resp.close()
+            if code in (403, 429, 503) and is_wall(code, head):
+                raise BotWall(f"HTTP {code}（疑似反爬拦截）")
             raise FetchError(f"HTTP {code}")
         ctype = resp.headers.get("Content-Type", "")
         raw = bytearray()
@@ -118,7 +137,37 @@ def fetch(url: str) -> tuple[str, str, bytes]:
                     break
         finally:
             resp.close()
+        if is_wall(200, bytes(raw[:20000])) and len(raw) < 60000:
+            raise BotWall("返回的是人机验证页")
         return current, ctype, bytes(raw)
+    raise FetchError("重定向次数过多")
+
+
+def fetch_impersonate(url: str) -> tuple[str, str, bytes]:
+    """Like fetch(), but with a real browser's TLS/HTTP2 fingerprint (curl_cffi, optional)."""
+    try:
+        from curl_cffi import requests as creq
+    except ImportError as exc:
+        raise FetchError("curl_cffi 未安装") from exc
+    current = url
+    for _ in range(MAX_REDIRECTS + 1):
+        validate_url(current)
+        try:
+            resp = creq.get(current, impersonate="chrome", timeout=TIMEOUT[1], allow_redirects=False,
+                            headers={"Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8"})
+        except Exception as exc:  # noqa: BLE001 - curl errors vary
+            raise FetchError(f"请求失败: {exc.__class__.__name__}") from exc
+        if resp.status_code in (301, 302, 303, 307, 308) and resp.headers.get("Location"):
+            current = urljoin(current, resp.headers["Location"])
+            continue
+        body = resp.content[:MAX_BYTES]
+        if resp.status_code >= 400:
+            if is_wall(resp.status_code, body):
+                raise BotWall(f"HTTP {resp.status_code}（疑似反爬拦截）")
+            raise FetchError(f"HTTP {resp.status_code}")
+        if is_wall(200, body[:20000]) and len(body) < 60000:
+            raise BotWall("返回的是人机验证页")
+        return current, resp.headers.get("Content-Type", ""), body
     raise FetchError("重定向次数过多")
 
 

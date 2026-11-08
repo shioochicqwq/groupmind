@@ -1,0 +1,6 @@
+<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>报名表</title><script src="common.js"></script></head>
+<body><label>昵称 <input id="nick"></label><br>
+<label>想读的书 <select id="book"><option value="">请选择</option><option>三体</option><option>活着</option><option>百年孤独</option></select></label><br>
+<button onclick="sub()">报名</button><p id="r" role="status"></p>
+<script>function sub(){ if(!nick.value||!book.value){r.textContent='请填完整';return;} log('submit',{nick:nick.value,book:book.value}); r.textContent='报名成功，座位号：'+code(nick.value+book.value); }</script>
+</body></html>
