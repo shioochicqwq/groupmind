@@ -266,3 +266,21 @@ def test_refused_home_page_is_not_retried():
     assert len(page.log) == 1
     assert asyncio.run(b.load(page, "https://site.example/deep")) is False
     assert len(page.log) == 3 and not b._front_door
+
+
+def test_dead_display_leftovers_do_not_count_as_in_use(tmp_path):
+    """A killed X server leaves its socket and lock behind; only a server that answers is in use."""
+    import socket
+    b = _browser()
+    (tmp_path / ".X11-unix").mkdir()
+    path = tmp_path / ".X11-unix" / "X95"
+    srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    srv.bind(str(path))
+    srv.listen(1)
+    (tmp_path / ".X95-lock").write_text("1\n")
+    assert b.display_in_use(95, str(tmp_path)) is True
+    srv.close()  # the file stays, nobody listens
+    assert path.exists() and b.display_in_use(95, str(tmp_path)) is False
+    b.clear_display(95, str(tmp_path))
+    assert not path.exists() and not (tmp_path / ".X95-lock").exists()
+    assert b.display_in_use(96, str(tmp_path)) is False
