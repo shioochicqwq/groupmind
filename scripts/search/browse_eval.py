@@ -216,7 +216,8 @@ async def main_async(args):
     port = serve()
     base = f"http://127.0.0.1:{port}"
     browser = br.Browser(br.BrowserConfig(profile_dir=str(args.profile), executable_path=args.executable,
-                                          headless=True, allow_hosts=frozenset({"127.0.0.1"}), challenge_wait=5))
+                                          headless=args.headless, xvfb_command=args.xvfb, allow_hosts=frozenset({"127.0.0.1"}),
+                                          challenge_wait=5, min_host_interval=0))
     rows = []
     try:
         for case in CASES:
@@ -249,6 +250,8 @@ def main():
     ap.add_argument("--only", nargs="*")
     ap.add_argument("--profile", type=Path, default=Path(os.environ.get("TMPDIR", "/tmp")) / "browse-eval-profile")
     ap.add_argument("--executable", default=os.environ.get("BROWSER_EXECUTABLE", ""))
+    ap.add_argument("--headless", action="store_true")
+    ap.add_argument("--xvfb", default=os.environ.get("XVFB_COMMAND", "Xvfb"))
     asyncio.run(main_async(ap.parse_args()))
 
 
