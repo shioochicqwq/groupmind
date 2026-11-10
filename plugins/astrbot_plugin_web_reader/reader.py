@@ -40,7 +40,8 @@ class BotWall(FetchError):
 
 WALL_MARKERS = ("Just a moment", "Performing security verification", "Attention Required",
                 "cf-chl", "challenge-platform", "Verify you are human", "DDoS-Guard",
-                     "请稍候…", "正在进行安全验证", "确认您是真人", "安全验证 - 知乎", "百度安全验证")
+                "请稍候…", "正在进行安全验证", "确认您是真人", "安全验证 - 知乎", "百度安全验证",
+                "Please complete the additional verification challenge", "Security check required")
 
 
 def is_wall(status: int, body: bytes) -> bool:

@@ -2,10 +2,11 @@
 
 Unlike the black-box DeepSeek fetch API, `web_reader` returns the page's links, so the model
 can navigate a site (homepage -> article). When a site answers with a bot check, reading
-escalates: plain request -> browser TLS fingerprint (curl_cffi) -> real browser (patchright),
-each step only if the previous one hit a wall. `browser_*` tools let the model use a page
-(questionnaires, small quiz/game pages). Read-only toward the host: no shell, no files,
-no downloads; every browser request passes the same public-address check.
+escalates: plain request -> browser TLS fingerprint (curl_cffi) -> real Chrome (patchright) ->
+Camoufox (Firefox, when installed), each step only if the previous one hit a wall. `browser_*`
+tools let the model use a page (questionnaires, small quiz/game pages). Read-only toward the
+host: no shell, no files, no downloads; every browser connection goes through a local proxy
+that refuses non-public addresses.
 """
 
 from __future__ import annotations
@@ -26,7 +27,7 @@ from .reader import BlockedURL, BotWall, FetchError, extract, fetch, fetch_imper
     "astrbot_plugin_web_reader",
     "qqbot",
     "本地读取网页正文和链接（带 SSRF 防护、反爬逐级升级），并能用浏览器操作网页",
-    "0.3.0",
+    "0.4.0",
 )
 class WebReaderPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig | None = None) -> None:
@@ -40,18 +41,27 @@ class WebReaderPlugin(Star):
                 profile = str(Path(get_astrbot_data_path()) / "web_reader_browser")
             except Exception:  # noqa: BLE001
                 profile = str(Path.home() / ".cache" / "web_reader_browser")
-        self.browser = br.Browser(br.BrowserConfig(
-            profile_dir=profile,
-            executable_path=c.get("browser_executable", ""),
-            headless=bool(c.get("browser_headless", True)),
+        common = dict(
+            headless=bool(c.get("browser_headless", False)),
+            locale=c.get("browser_locale") or "zh-CN",
+            timezone=c.get("browser_timezone", ""),
+            xvfb_command=c.get("xvfb_command") or "Xvfb",
             challenge_wait=float(c.get("challenge_wait_seconds", 45)),
-        ))
+        )
+        self.browser = br.Browser(br.BrowserConfig(
+            profile_dir=profile, executable_path=c.get("browser_executable", ""), **common))
+        # second engine for the fetch tier only; started on first use
+        self.fox = None
+        if self.browser_enabled and bool(c.get("camoufox_enabled", True)) and br.available("camoufox"):
+            self.fox = br.Browser(br.BrowserConfig(profile_dir=profile + "_camoufox", engine="camoufox", **common))
         self.sessions: dict[str, br.Session] = {}
 
     async def terminate(self):
         for s in self.sessions.values():
             await s.close()
         await self.browser.close()
+        if self.fox is not None:
+            await self.fox.close()
 
     @staticmethod
     def _too_thin(ctype: str, raw: bytes, url: str) -> bool:
@@ -86,12 +96,21 @@ class WebReaderPlugin(Star):
                 logger.info(f"web_reader impersonate tier: {exc}")
         if not self.browser_enabled:
             raise BotWall("网站有反爬验证，且未启用浏览器")
-        final, html, passed = await self.browser.fetch_rendered(url)
-        if not passed:
-            if thin:
-                return thin
-            raise BotWall("网站的人机验证没有通过（可能是当前网络 IP 被拦）")
-        return final, "text/html", html.encode("utf-8"), "（经浏览器读取）"
+        for b, how in ((self.browser, "（经浏览器读取）"), (self.fox, "（经第二浏览器读取）")):
+            if b is None:
+                continue
+            try:
+                final, html, passed = await b.fetch_rendered(url)
+            except PermissionError:
+                raise
+            except Exception as exc:  # noqa: BLE001 - this engine failed; the next may not
+                logger.info(f"web_reader browser tier ({b.cfg.engine}): {exc!r}")
+                continue
+            if passed:
+                return final, "text/html", html.encode("utf-8"), how
+        if thin:
+            return thin
+        raise BotWall("网站的人机验证没有通过（可能是当前网络 IP 被拦，或访问太频繁）")
 
     @filter.llm_tool(name="web_reader")
     async def web_reader(

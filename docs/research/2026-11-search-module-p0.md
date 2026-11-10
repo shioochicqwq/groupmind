@@ -262,7 +262,10 @@ AstrBot 内置的 `web_search_deepseek` 与 `deepseek_fetch_web_page` 就是直�
 | 以上 + 模拟鼠标点 Turnstile 勾选框 | 点后复位 | 点后复位 |
 | Camoufox（Firefox 反指纹，无头）+ 点击 | 停在 Turnstile | 停在 Turnstile |
 
-结论：**本机过不了 Cloudflare 交互验证，连通用测试页都过不了，主要是 IP 信誉问题**，不是浏览器指纹（这些工具在家宽 IP 上通常能过）。有界面浏览器（Xvfb）这一档没测成：本机无 root，解包的 Xvfb 找不到 `xkbcomp`。archive.org 对本机也返回 429/403，不能当兜底。
+结论：**本机过不了 Cloudflare 交互验证，连通用测试页都过不了，主要是 IP 信誉问题**，不是浏览器指纹（这些工具在家宽 IP 上通常能过）。
+
+> **2026-11-10 更正**：「主要是 IP 信誉、不是指纹」这个归因没有被证明，见第 13 节。当时浏览器档自己就带着明显的机器特征（UA 写着 HeadlessChrome、软件渲染显卡、Chromium 130 旧版），IP 和环境两个因素没有分开测。
+有界面浏览器（Xvfb）这一档没测成：本机无 root，解包的 Xvfb 找不到 `xkbcomp`。archive.org 对本机也返回 429/403，不能当兜底。
 
 ### 12.2 web_reader 0.3.0：逐级升级读取
 
@@ -339,3 +342,128 @@ DeepSeek（`deepseek-chat`）每题 3 次：
 - 3 分钟、93 MB 的合成视频：转码后 2 MB，一段即可。人为把上限压到 600 KB 后切成 40 秒一段，各段时间正确接上，绿块「01:35–01:56」（真实 01:35–01:55）、蓝块位置和时间都对。红块没报出来，是我造的测试视频把红块画在了红色条带上，原片里也看不出来。
 - YouTube「Me at the zoo」：本机可下载，18 秒答对「站在大象前」并逐句转录原话。B 站在本机仍是 412（机房 IP），Vimeo 要登录。
 - 单元测试 `tests/bench/test_video_reader.py`（切段长度、时间换算，以及用 ffmpeg 真实切片并检查各段大小和时间接续）。
+
+## 13. 反爬识别什么特征、有哪些现成方案（2026-11-10 调研）
+
+只做了调研和一次本机自检，没有新的过墙测试。来源多数是爬虫厂商博客和个人评测，Cloudflare 官方文档只给出大类。
+
+### 13.1 识别的特征（按请求先后）
+
+| 层 | 看什么 | 我们现在的状态 |
+|---|---|---|
+| IP | 机房/住宅/移动、ASN、滥用历史 | 本机是新加坡机房 IP，差 |
+| TLS / HTTP2 | JA3/JA4 握手指纹、HTTP2 SETTINGS 和优先级、请求头顺序，要和声称的浏览器版本一致 | 指纹档用 curl_cffi 能对上；浏览器档是 Chromium 130，版本很旧 |
+| 浏览器 JS 环境 | `navigator.webdriver`、UA 里的 HeadlessChrome、`sec-ch-ua`、插件、屏幕和窗口尺寸、时区和语言是否与 IP 所在地一致 | UA 带 HeadlessChrome；时区 UTC、语言只有 zh-CN，而 IP 在新加坡；屏幕等于视口、无窗口边框 |
+| 硬件指纹 | WebGL 显卡型号（SwiftShader、llvmpipe 是服务器特征）、canvas、音频、字体、有无摄像头麦克风 | 显卡是 SwiftShader |
+| 自动化协议 | CDP 的 `Runtime.enable`、Playwright 启动时的固定指令序列、请求拦截 | patchright 修了 `Runtime.enable`；但我们用了 `route` 拦截全部请求，并固定了视口，都不在它推荐的用法里 |
+| 行为 | 鼠标轨迹、点击节奏、是否直接打开深层页面、请求频率（`__cf_bm` cookie 记同一访客的请求模式） | 直接开深层页；点击没有轨迹 |
+| 挑战 | Turnstile：工作量证明、探测浏览器 API、综合以上打分；分低的要点框或直接不给过 | 停在这一步 |
+
+本机自检（patchright + 插件现用的启动参数，`about:blank` 上读取，不访问外站）：UA `HeadlessChrome/130.0.0.0`，WebGL `ANGLE (… SwiftShader …)`，时区 UTC，2 核，屏幕 1366×850 且外框等于内框。
+
+一条直接相关的外部记录（The Web Scraping Club 2023-07、2024-03、2024-09）：同一工具在本地电脑能过 Cloudflare，在 AWS 上即使挂住宅代理也被拦，原因是机房硬件指纹（SwiftShader、没有音视频设备）；把 WebGL 显卡字符串换成真实显卡就过了。所以 12.1 的「IP 信誉」归因需要重测才能下。
+
+### 13.2 现成项目
+
+| 项目 | 做法 | 许可 | 评价 |
+|---|---|---|---|
+| nodriver / zendriver | 不经 Playwright，直接用 CDP 驱动真 Chrome，带点 Turnstile 的 `cf_verify` | AGPL-3.0 | 一份 2026-05 的独立评测（31 个目标，住宅 IP，有界面）里唯一没有被硬拦的；无头时 nodriver 的 UA 仍是 HeadlessChrome，zendriver 修了但丢了 `sec-ch-ua` |
+| Camoufox | 改 Firefox 源码，在引擎层伪造显卡、字体、屏幕、时区等 | MPL-2.0 | 无头也能过检测页的只有它；可用 `headless="virtual"` 自带虚拟显示；启动约 10 秒；软件渲染时会报 llvmpipe |
+| Scrapling `StealthyFetcher` | 封装浏览器 + `solve_cloudflare=True` 自动过 Turnstile 和等待页，带 MCP 和命令行 | BSD-3 | 最接近「拿来就用」；TWSC 2025-10 报告无头也能过 Turnstile |
+| Byparr / Solverr | Camoufox 做成 HTTP 服务（FlareSolverr 接口） | GPL-3.0 | README 自己写明不保证能过，且需要本机公网 IP 本身有正常流量 |
+| SeleniumBase UC / CDP 模式 | 关键时刻断开 WebDriver，`solve_captcha()` 点验证 | MIT | 维护活跃；框架偏重 |
+| patchright（现用） | 修补 Playwright 的 CDP 泄漏 | Apache-2.0 | 官方推荐配置是真 Chrome、有界面、`no_viewport`、不改 UA，我们四条里只满足最后一条 |
+| CloakBrowser | 源码级改 Chromium（87 处补丁） | 封装 MIT，**浏览器本体闭源、要许可证密钥** | 独立评测有界面 83%、无头 50%；不适合开源项目依赖 |
+| FlareSolverr、undetected-chromedriver、cloudscraper、puppeteer-stealth、rebrowser | 旧一代 | — | 多个来源称已过时或停更 |
+
+没有一个项目声称能解决机房 IP：Byparr、CloakBrowser、Camoufox 的 README 都写明机房 IP 会被信誉这一层拦，推荐住宅代理。另一条正路是 Cloudflare 的 Web Bot Auth（给请求签名、登记为 signed agent），但放不放行由站长决定，对 rym 这种站帮不上。
+
+中文站各有自己的风控，不是 Cloudflare：知乎靠请求签名（`x-zse-96`）加未登录限制，错误码 40362 是风控限制；B 站 412 常见建议是带登录 cookie 并保持 yt-dlp 最新。这两个更可能要靠登录态，而不是浏览器伪装。
+
+### 13.3 对插件的含义（1–4 已于 2026-11-10 实施，见第 14 节）
+
+1. 浏览器档先改成 patchright 推荐配置：真 Chrome 新版、有界面（虚拟显示）、不固定视口，时区和语言跟出口 IP 对齐。
+2. 公网地址检查不要用 `route` 拦截实现，换成不开拦截的办法（例如导航前校验加代理层过滤）。
+3. 加一档 Camoufox 或直接接 Scrapling 的 `StealthyFetcher` 作为 Cloudflare 专用档。
+4. 探测脚本加「自检」一步：先上公开检测页（CreepJS、sannysoft、BrowserScan）看自己漏了什么，再打目标站。
+5. 把 IP 和环境分开测：同一套浏览器在家宽机器上跑一次，结果才能归因。
+
+来源：
+[Cloudflare bot detection engines](https://developers.cloudflare.com/bots/concepts/bot-detection-engines/)、
+[TWSC Cloudflare bypass timeline](https://publish.obsidian.md/twsc-public/Web+Scraping/Wiki/timelines/cloudflare-bypass-evolution)、
+[Scrapfly: best stealth browsers 2026](https://scrapfly.io/blog/posts/best-stealth-browsers)、
+[Paterson: anti-detect browser benchmark 2026](https://ianlpaterson.com/blog/anti-detect-browser-benchmark-patchright-nodriver-curl-cffi/)、
+[Rahim: 7 stealth browsers vs 6 detection pages](https://ijazurrahim.com/blog/stealth-browsers-tested-2026.html)、
+[patchright-python](https://github.com/Kaliiiiiiiiii-Vinyzu/patchright-python)、
+[nodriver](https://github.com/ultrafunkamsterdam/nodriver)、
+[Camoufox](https://github.com/daijro/camoufox)、
+[Scrapling](https://github.com/D4Vinci/Scrapling)、
+[Byparr](https://github.com/ThePhaseless/Byparr)、
+[CloakBrowser](https://github.com/CloakHQ/CloakBrowser)、
+[SeleniumBase CDP mode](https://github.com/seleniumbase/SeleniumBase/blob/master/examples/cdp_mode/ReadMe.md)、
+[Archive Team: Zhihu](https://wiki.archiveteam.org/index.php/Zhihu)
+
+## 14. 更新（2026-11-10）：按 13.3 实施后的结果，rym 在本机可读
+
+结论：金标准（rym 专辑页）在本机机房 IP 上读到了，用的是插件自己的读取路径和全新的浏览器配置目录，耗时约 22 秒。12.1 里「卡在 IP 信誉」的判断不成立，原因是浏览器环境加上访问方式。web_reader 升到 0.4.0。
+
+### 14.1 改了什么
+
+| 项 | 做法 |
+|---|---|
+| 浏览器启动 | 优先系统里的 Google Chrome（本机 157），没有再用 patchright 自带 Chromium。默认有界面、不固定视口、不改 UA 和请求头。 |
+| 虚拟屏幕 | Linux 上没有桌面时插件自己起 Xvfb（1920×1080），关闭时一起收掉。起不来才退回无头，并把 UA 里的 `Headless` 去掉。 |
+| 时区和语言 | 新配置项 `browser_timezone`、`browser_locale`。探测脚本默认取出口 IP 所在时区。 |
+| 公网地址检查 | 去掉 `route` 请求拦截，换成本地转发代理 `GuardProxy`：自己解析域名，只连公网地址，连的就是检查过的那个地址。浏览器所有连接都经过它。 |
+| WebRTC | Chrome 的 WebRTC 会绕过代理直接发 UDP。用配置目录里的首选项关掉（命令行开关在 Chrome 157 上不生效）。 |
+| 第二引擎 | Camoufox（Firefox）作为 Chrome 之后的一档，只用于读取，没装就跳过。人设必须跟宿主系统一致：本机用 Windows 人设过不了 Cloudflare，用 Linux 人设能过。Firefox 默认不让本机地址走代理，已用首选项改掉。 |
+| 冷链接被拒 | 页面直接返回错误、又没有可解的验证时，先开站点首页，再从首页跳到目标页。记住这个站点，之后直接带首页作 Referer。 |
+| 节流 | 同一站点两次页面加载至少间隔 3 秒。 |
+| 迟到的验证页 | 页面先加载、随后才跳到验证页的站点（知乎），读取前再检查一次。 |
+
+没有接 Scrapling：它的 `StealthyFetcher` 现在就是 patchright 加 Chromium，跟我们的 Chrome 档是同一件事。
+
+### 14.2 自检（探测脚本新增的第一步）
+
+| 检测页 | Chrome 157（Xvfb） | Camoufox | Chrome 无头（对照） |
+|---|---|---|---|
+| sannysoft | 只有 WebGL 两项不过（无 WebGL） | 只有「无 chrome 对象」一项（Firefox 本来就没有） | WebGL 渲染器是 SwiftShader |
+| deviceandbrowserinfo | 不是机器人，无标记 | 不是机器人，无标记 | 不是机器人，无标记 |
+| BrowserScan | Normal | Normal | Normal |
+| CreepJS | 44% 像无头，0% 无头，0% 伪装 | 13% / 0% / 0% | 50% / 0% / 0% |
+
+还漏的：本机没有显卡，Xvfb 下 Chrome 拿不到 WebGL。有显卡和桌面的家宽机器上不会有这一项。无头对照的屏幕是 800×600，这也是默认不用无头的原因。
+
+### 14.3 站点结果（本机，机房 IP，新加坡）
+
+| 站点 | 11-08（0.3.0） | 11-10（0.4.0） |
+|---|---|---|
+| Cloudflare 测试页 | 不过 | Chrome 档通过，约 10 秒，不用点 |
+| 萌娘百科 | 浏览器档通过 | 浏览器档通过 |
+| 百度百科 | 浏览器档通过 | 浏览器档通过 |
+| 知乎问题页 | 停在安全验证 | 仍停在安全验证（Chrome 和 Camoufox 都是） |
+| rym 首页、艺人页 | 不过 | Chrome 档通过 |
+| rym 专辑页（金标准） | 不过 | Chrome 档通过，经首页进入 |
+
+rym 有三层，分别是：
+
+1. Cloudflare 验证。真 Chrome 有界面时几秒自动通过。
+2. 专辑页（`/release/…`）对不带 Referer 的请求直接回 503 空响应。同一配置目录、同一 IP、相隔几分钟的对照：不带 Referer 503，带站内 Referer 200。这就是之前「专辑页打不开」的原因。
+3. 访问太快时出 rym 自己的「Security check required」页（Google reCAPTCHA）。11-10 调试时 10 分钟内加载约 20 页触发过一次，停一阵后恢复。这一层不去解，靠节流避开。
+
+无头对照也过了 Cloudflare 测试页，所以 11-08 失败的主因不是「无头」这一项本身，而是旧配置的组合（Chromium 130、UA 带 `HeadlessChrome`、请求拦截、UTC 时区）。没有逐项拆开测。
+
+### 14.4 回归
+
+- 网页操作评测 10 个本地页面各 1 次，10/10（`runs/search/browse.v3-proxy.deepseek.json`，DeepSeek，共约 11.5 万输入 token、0.35 万输出 token）。
+- `tests/bench` 118 项通过。新增：代理拒绝本机和内网地址、冷链接被拒后走首页。
+
+### 14.5 没做和要注意的
+
+- 知乎没过。两种引擎都被拦，可能是 IP 类别，也可能要登录，没有拆开测。
+- 结果只在本机测过。家宽机器上要再跑一次 `antibot_probe.py`（加 `--rym` 才会碰 rym）。
+- rym 的结论基于少量请求（专辑页成功 4 次、不带 Referer 的对照失败 3 次）。长期稳定性没测，rym 可能改规则。
+- 部署机需要装 Google Chrome 和 Xvfb（无桌面时）。本机没有 root，两者都是解包到 `qqbot-data/vendor/` 后用的。
+- `GuardProxy` 不支持上游代理。要让浏览器走手机代理时得加。
+
+结果文件：`runs/search/antibot.container.2026-11-10.json`、`antibot.container.rym.2026-11-10.json`（加首页重试之前，专辑页失败）、`antibot.container.rym-v2.2026-11-10.json`（之后，通过）、`antibot.container.headless.2026-11-10.json`。

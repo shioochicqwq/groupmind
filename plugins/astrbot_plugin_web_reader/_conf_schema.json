@@ -1,7 +1,11 @@
 {
   "browser_enabled": {"description": "启用浏览器（反爬升级读取 + 网页操作工具）；需要 patchright", "type": "bool", "default": true},
-  "browser_executable": {"description": "可选：Chromium/Chrome 可执行文件路径（留空用 patchright 自带浏览器）", "type": "string", "default": ""},
-  "browser_headless": {"description": "无头模式。家宽机器有桌面或 Xvfb 时关掉，过人机验证更容易", "type": "bool", "default": true},
+  "browser_executable": {"description": "可选：Chrome 可执行文件路径。留空时先用系统安装的 Google Chrome（过人机验证最稳），没有再用 patchright 自带的 Chromium", "type": "string", "default": ""},
+  "browser_headless": {"description": "无头模式。默认关：无头浏览器会被反爬直接认出来。关掉后有桌面的机器会弹出浏览器窗口；没有桌面的 Linux 服务器插件会自己起一个 Xvfb 虚拟屏幕（需要装 xvfb），起不来才退回无头", "type": "bool", "default": false},
+  "browser_timezone": {"description": "浏览器时区，如 Asia/Shanghai。应与出口 IP 所在地一致（服务器系统时区常是 UTC，会和 IP 对不上）；留空用系统时区", "type": "string", "default": ""},
+  "browser_locale": {"description": "浏览器语言", "type": "string", "default": "zh-CN"},
+  "xvfb_command": {"description": "Xvfb 命令或路径（仅无桌面的 Linux 用到）", "type": "string", "default": "Xvfb"},
+  "camoufox_enabled": {"description": "Chrome 过不去时再用 Camoufox（Firefox）试一次；需要 pip install camoufox 并执行 camoufox fetch，没装则自动跳过", "type": "bool", "default": true},
   "browser_profile_dir": {"description": "可选：浏览器配置目录（保存验证通过后的 cookie）；留空放在 AstrBot data 目录", "type": "string", "default": ""},
   "challenge_wait_seconds": {"description": "等人机验证通过的最长秒数", "type": "int", "default": 45}
 }
