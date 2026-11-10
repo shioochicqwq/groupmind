@@ -230,13 +230,14 @@ async def main_async(args):
                 rows.append(r)
                 print(json.dumps({k: v for k, v in r.items() if k not in ("trace", "answer")}, ensure_ascii=False), flush=True)
     finally:
+        mode = browser.mode
         await browser.close()
     summary = {cid: f"{sum(r['success'] for r in rows if r['id'] == cid)}/{sum(r['id'] == cid for r in rows)}"
                for cid in dict.fromkeys(r["id"] for r in rows)}
     args.out.parent.mkdir(parents=True, exist_ok=True)
-    args.out.write_text(json.dumps({"model": args.model, "when": time.strftime("%Y-%m-%d %H:%M"), "summary": summary,
+    args.out.write_text(json.dumps({"model": args.model, "when": time.strftime("%Y-%m-%d %H:%M"), "summary": summary, "browser_mode": mode,
                                     "rows": rows}, ensure_ascii=False, indent=1), encoding="utf-8")
-    print("summary", summary)
+    print("summary", summary, mode)
 
 
 def main():

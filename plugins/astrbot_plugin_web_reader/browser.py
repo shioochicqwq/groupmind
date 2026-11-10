@@ -32,6 +32,7 @@ from __future__ import annotations
 import asyncio
 import ipaddress
 import json
+import logging
 import os
 import shutil
 import socket
@@ -44,6 +45,8 @@ try:
     from patchright.async_api import async_playwright
 except ImportError:  # pragma: no cover - optional
     async_playwright = None
+
+log = logging.getLogger("astrbot")
 
 CHALLENGE_MARKERS = ("Just a moment", "Performing security verification", "Attention Required",
                      "cf-chl", "challenge-platform", "Verify you are human", "DDoS-Guard",
@@ -63,6 +66,28 @@ HOST_OS = {"linux": "linux", "win32": "windows", "darwin": "macos"}.get(sys.plat
 
 def available(engine: str = "chrome") -> bool:
     return (AsyncCamoufox if engine == "camoufox" else async_playwright) is not None
+
+
+def display_in_use(n: int, root: str = "/tmp") -> bool:
+    """Is an X server answering on display :n? A socket or lock file alone proves nothing: a server
+    that was killed leaves both behind."""
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    try:
+        s.settimeout(1)
+        s.connect(f"{root}/.X11-unix/X{n}")
+        return True
+    except OSError:
+        return False
+    finally:
+        s.close()
+
+
+def clear_display(n: int, root: str = "/tmp") -> None:
+    for path in (f"{root}/.X11-unix/X{n}", f"{root}/.X{n}-lock"):
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
 
 
 def looks_blocked(status: int | None, text: str) -> bool:
@@ -244,6 +269,7 @@ class Browser:
         self._lock = asyncio.Lock()
         self.proxy = GuardProxy(cfg.allow_hosts)
         self._xvfb = None
+        self._display_no = -1
         self._fox = None
         self._last_nav: dict[str, float] = {}
         self._front_door: set[str] = set()  # hosts that refuse a cold deep link but serve it from inside the site
@@ -256,23 +282,26 @@ class Browser:
             return True
         cmd = self.cfg.xvfb_command or "Xvfb"
         if not (shutil.which(cmd) or os.path.isfile(cmd)):
+            log.warning("web_reader: no display and no Xvfb (%s); the browser will run headless, "
+                        "which sites detect more easily", cmd)
             return False
         for n in range(90, 110):
-            sock = f"/tmp/.X11-unix/X{n}"
-            if os.path.exists(sock) or os.path.exists(f"/tmp/.X{n}-lock"):
+            if display_in_use(n):
                 continue
+            clear_display(n)  # leftovers of a server that was killed would make the number look taken
             proc = await asyncio.create_subprocess_exec(
                 cmd, f":{n}", "-screen", "0", "1920x1080x24", "-nolisten", "tcp",
                 stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
             for _ in range(50):
-                if os.path.exists(sock):
-                    self._xvfb, env["DISPLAY"], self.mode = proc, f":{n}", "xvfb"
+                if display_in_use(n):
+                    self._xvfb, self._display_no, env["DISPLAY"], self.mode = proc, n, f":{n}", "xvfb"
                     return True
                 if proc.returncode is not None:
                     break
                 await asyncio.sleep(0.1)
             if proc.returncode is None:
                 proc.kill()
+        log.warning("web_reader: Xvfb did not start; the browser will run headless, which sites detect more easily")
         return False
 
     def _targets(self) -> list[dict]:
@@ -374,8 +403,18 @@ class Browser:
             await self._pw.stop()
         self._ctx = self._pw = self._fox = None
         await self.proxy.close()
-        if self._xvfb is not None and self._xvfb.returncode is None:
-            self._xvfb.terminate()
+        if self._xvfb is not None:
+            if self._xvfb.returncode is None:
+                self._xvfb.terminate()
+                try:
+                    await asyncio.wait_for(self._xvfb.wait(), 5)
+                except asyncio.TimeoutError:
+                    self._xvfb.kill()
+            for _ in range(20):  # a wrapper script may exit a moment before the server itself
+                if not display_in_use(self._display_no):
+                    clear_display(self._display_no)
+                    break
+                await asyncio.sleep(0.1)
         self._xvfb = None
 
     async def new_page(self):
