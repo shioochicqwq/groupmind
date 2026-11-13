@@ -13,6 +13,7 @@ they equal what the research code reads from the files, then that BM25 returns t
 from __future__ import annotations
 
 import argparse
+import re
 import hashlib
 import json
 import sqlite3
@@ -134,7 +135,7 @@ def messages_from_db(con: sqlite3.Connection, code: str) -> list[Message]:
         "FROM message m JOIN chat c ON c.id = m.chat_id JOIN person p ON p.id = m.sender_id "
         "WHERE c.code = ? ORDER BY m.order_key", (code,)).fetchall()
     return [Message(msg_id=r[0], channel=code, author=r[1], timestamp=r[2], content=r[3], reply_to=r[4],
-                    media=tuple(json.loads(r[5])), nickname_at_time=r[6]) for r in rows]
+                    media=tuple(json.loads(r[5] or "[]")), nickname_at_time=r[6]) for r in rows]   # live rows carry no media list
 
 
 def colors_from_db(con: sqlite3.Connection, code: str, source_file: str) -> list[dict]:
@@ -192,9 +193,38 @@ def verify(con: sqlite3.Connection, code: str, run_dir: Path, labels: Path | Non
     return report
 
 
+def link_accounts(con: sqlite3.Connection) -> dict:
+    """Link each imported person to the account number in the export's member list.
+
+    A live protocol reports that number, the export reports the client's internal id; without
+    the link the same person becomes two. Only groups already in the database are read.
+    """
+    from bench.datasets import qq_export
+
+    known = {uid: pid for uid, pid in con.execute("SELECT platform_uid, id FROM person WHERE platform = ?", (PLATFORM,))}
+    codes = {code for (code,) in con.execute("SELECT code FROM chat WHERE platform = ?", (PLATFORM,))}
+    found: dict[str, set[int]] = {}
+    for path in (realdata.DATA_DIR / "reconciled").glob("*.jsonl"):
+        if realdata.pseudonym(path.stem) not in codes:
+            continue
+        for r in qq_export.iter_records(path):
+            if r.get("_type") == "message":
+                break
+            number = re.search(r"[?&]nk=(\d+)", r.get("avatar") or "") if r.get("_type") == "member" else None
+            if number and r.get("platformId") in known:
+                found.setdefault(number.group(1), set()).add(known[r["platformId"]])
+    clear = {account: next(iter(ids)) for account, ids in found.items() if len(ids) == 1}
+    live = sum(account in known for account in clear)  # already recorded as a separate person by the bot
+    con.executemany("INSERT OR IGNORE INTO person_account VALUES (?, ?, ?)", [(PLATFORM, a, pid) for a, pid in clear.items()])
+    con.commit()
+    return {"persons": len(known), "linked": len(set(clear.values())), "ambiguous_accounts": len(found) - len(clear),
+            "already_live_as_separate_person": live}
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest="cmd", required=True)
+    sub.add_parser("accounts").add_argument("--db", type=Path, required=True)
     for name in ("import", "verify"):
         p = sub.add_parser(name)
         p.add_argument("--db", type=Path, required=True)
@@ -203,6 +233,9 @@ def main() -> int:
         p.add_argument("--labels-group", default="4fe395")
     sub.choices["import"].add_argument("--map", type=Path, required=True)
     args = ap.parse_args()
+    if args.cmd == "accounts":
+        print(json.dumps(link_accounts(connect(args.db))))
+        return 0
     groups = dict(g.split("=", 1) for g in args.groups)
     con = connect(args.db)
     if args.cmd == "import":

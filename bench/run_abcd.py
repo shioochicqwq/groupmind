@@ -136,6 +136,13 @@ def prepare(args) -> SimpleNamespace:
     )
     awkward = set(merged["questions"]["awkward"])
 
+    colors_file = getattr(args, "colors_file", "") or "colors.gemini-3.8-flash-high.jsonl"
+    colors = [json.loads(x) for x in (args.out / colors_file).read_text(encoding="utf-8").splitlines()]
+    return SimpleNamespace(**{k: v for k, v in locals().items() if k != "args"}, **color_indexes(messages, colors))
+
+
+def color_indexes(messages, colors: list[dict]) -> dict:
+    """The tokenizer with the words learned from the first 70% of the messages, and the two keyword indexes over colours."""
     import jieba
 
     jieba.initialize()
@@ -145,15 +152,13 @@ def prepare(args) -> SimpleNamespace:
         if not re.search(r"P\d", w)
     )
     tok = tokenize.make_jieba(learned)
-    colors_file = getattr(args, "colors_file", "") or "colors.gemini-3.8-flash-high.jsonl"
-    colors = [json.loads(x) for x in (args.out / colors_file).read_text(encoding="utf-8").splitlines()]
     summary_blocks = chunking.from_colors(messages, colors, "summary")
     raw_color_blocks = chunking.from_colors(messages, colors, "raw")
     by_color = {b.block_id: b for b in raw_color_blocks}
     summary_of = {b.block_id: b.index_text for b in summary_blocks}
     summary_index = BM25(summary_blocks, tok)
     raw_index = BM25(raw_color_blocks, tok)
-    return SimpleNamespace(**{k: v for k, v in locals().items() if k != "args"})
+    return {k: v for k, v in locals().items() if k not in ("messages", "colors", "jieba")}
 
 
 def evaluate_arm(arm: Arm, conditions, llms, awkward: set[str], raw_path: Path | None = None) -> dict:

@@ -34,8 +34,12 @@ LEGACY = {**FROZEN, "name": "V0", "overlap_dedup": "none",
           "embedding": {**FROZEN["embedding"], "asymmetric": False, "instruct": ""}}
 
 
+def cache_file(config: dict, folder: Path) -> Path:
+    e = config["embedding"]
+    return (folder / "embed.aliyun.cache.jsonl" if config["name"] == "V0"
+            else folder / f"embed.ablation.{e['model']}.{e['dim']}.cache.jsonl")
+
+
 def embedder(config: dict, folder: Path) -> AliyunEmbedder:
     e = config["embedding"]
-    cache = (folder / "embed.aliyun.cache.jsonl" if config["name"] == "V0"
-             else folder / f"embed.ablation.{e['model']}.{e['dim']}.cache.jsonl")
-    return AliyunEmbedder(cache, e["model"], e["dim"], e["asymmetric"], e["instruct"])
+    return AliyunEmbedder(cache_file(config, folder), e["model"], e["dim"], e["asymmetric"], e["instruct"])

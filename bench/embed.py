@@ -144,6 +144,7 @@ class AliyunEmbedder(Embedder):
     """
 
     batch = 20  # qwen3.7-text-embedding rejects more than 20 inputs per request
+    tries, first_delay, timeout = 8, 5.0, 120   # patient, for batch work; a live caller sets its own
 
     def __init__(self, cache_path: Path, model: str = "qwen3.7-text-embedding-flash", dim: int = DIM,
                  asymmetric: bool = False, instruct: str = ""):
@@ -166,10 +167,10 @@ class AliyunEmbedder(Embedder):
             payload["instruct"] = self.instruct
         body = json.dumps(payload).encode()
         req = urllib.request.Request(ALIYUN_URL, body, {"Content-Type": "application/json", "Authorization": f"Bearer {key}"})
-        delay = 5.0
-        for _ in range(8):
+        delay = self.first_delay
+        for _ in range(self.tries):
             try:
-                with urllib.request.urlopen(req, timeout=120) as resp:
+                with urllib.request.urlopen(req, timeout=self.timeout) as resp:
                     data = json.load(resp)
                 total = data.get("usage", {}).get("prompt_tokens", 0)
                 chars = [max(len(t), 1) for t in texts]

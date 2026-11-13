@@ -7,21 +7,25 @@ from bench.sanitize import is_sensitive
 from bench.schema import Block, Message
 
 
-def raw_blocks(blocks: Sequence[Block], by_id: dict[str, Message], limit: int = 1500) -> list[str]:
-    """One text per block; messages already shown by an earlier block are dropped."""
+def new_messages(blocks: Sequence[Block], by_id: dict[str, Message]) -> list[list[Message]]:
+    """Per block, the messages it adds: not shown by an earlier block, not empty, not withheld."""
     seen: set[str] = set()
     out = []
     for block in blocks:
-        lines = []
+        part = []
         for i in block.msg_ids:
             m = by_id[i]
             if i in seen or not m.content or is_sensitive(m.content):
                 continue
             seen.add(i)
-            lines.append(f"{m.author}: {m.content}")
-        if lines:
-            out.append("\n".join(lines)[:limit])
+            part.append(m)
+        out.append(part)
     return out
+
+
+def raw_blocks(blocks: Sequence[Block], by_id: dict[str, Message], limit: int = 1500) -> list[str]:
+    """One text per block; messages already shown by an earlier block are dropped."""
+    return ["\n".join(f"{m.author}: {m.content}" for m in part)[:limit] for part in new_messages(blocks, by_id) if part]
 
 
 def merged_windows(blocks: Sequence[Block], by_id: dict[str, Message], order: dict[str, int]) -> list[str]:

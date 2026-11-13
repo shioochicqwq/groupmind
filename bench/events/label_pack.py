@@ -3,9 +3,10 @@
 Unit: an evening is 18:00 to 06:00 the next morning, Beijing time (UTC+8), with at least
 `min_msgs` messages. Each card shows the evening as its B blocks in time order (colour summary,
 time span, messages expandable), plus any uncoloured messages. No structural feature is shown,
-so the ratings do not lean on the measures the event layer will be tested with.
+so the ratings do not lean on the measures the event layer will be tested with. The pack is
+named after the output file, so a new file name starts with empty progress.
 
-    python -m bench.events.label_pack --group 4fe395 --run <runs>/real-dev --out <labels>/events-r1/dev1.html
+    python -m bench.events.label_pack --group 4fe395 --run <runs>/real-dev --out <labels>/events-r1/label-events-r1-dev1-v2.html
 """
 from __future__ import annotations
 
@@ -87,7 +88,7 @@ def main() -> int:
     msgs = clean_messages(realdata.load_group(args.group))
     colors = [json.loads(x) for x in (args.run / args.colors).open(encoding="utf-8")]
     items = evenings(msgs, colors, args.min_msgs)
-    data = {"pack": f"events-r1-{args.name.lower()}", "group": args.name, "min_msgs": args.min_msgs, "evenings": items}
+    data = {"pack": args.out.stem.removeprefix("label-"), "group": args.name, "min_msgs": args.min_msgs, "evenings": items}
     labelkit.build("events_round1", f"事件打标 · {args.name}", data, args.out)
     print(args.out, len(items), "evenings", sum(e["n"] for e in items), "messages")
     return 0

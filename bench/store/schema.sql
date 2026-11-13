@@ -17,6 +17,15 @@ CREATE TABLE IF NOT EXISTS person (
   UNIQUE (platform, platform_uid)
 );
 
+-- The account id a live protocol reports (the QQ number) for a person whose history was
+-- imported under the client's internal id, so both end up as one person.
+CREATE TABLE IF NOT EXISTS person_account (
+  platform TEXT NOT NULL,
+  account TEXT NOT NULL,
+  person_id INTEGER NOT NULL REFERENCES person(id),
+  PRIMARY KEY (platform, account)
+);
+
 CREATE TABLE IF NOT EXISTS person_name (
   person_id INTEGER NOT NULL REFERENCES person(id),
   chat_id INTEGER NOT NULL REFERENCES chat(id),
@@ -120,3 +129,20 @@ CREATE TABLE IF NOT EXISTS migration (
   inputs TEXT NOT NULL,                -- JSON: file -> sha256
   verified TEXT NOT NULL DEFAULT ''    -- JSON summary of the equivalence check
 );
+
+-- Keyword index over raw messages (D-030: FTS5 finds the candidates, scoring stays the BM25Okapi
+-- formula of bench.retrievers.bm25). Kept current one message at a time by bothost/store.py, which
+-- also catches up on rows added by the importer. body holds the jieba tokens, space-separated.
+CREATE VIRTUAL TABLE IF NOT EXISTS message_fts USING fts5(
+  body, dl UNINDEXED, tokenize = "unicode61 remove_diacritics 0 tokenchars '_'"
+);
+CREATE TABLE IF NOT EXISTS message_df (term TEXT PRIMARY KEY, df INTEGER NOT NULL) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS message_fts_meta (k TEXT PRIMARY KEY, v REAL NOT NULL) WITHOUT ROWID;
+
+-- Vectors by content key: bench.embed hashes model, size, role and text into the key, so one text
+-- is embedded once whatever asks for it. Filled from the research cache files (bench.store.frozen).
+CREATE TABLE IF NOT EXISTS embedding (
+  key TEXT PRIMARY KEY,
+  model TEXT NOT NULL,
+  vector BLOB NOT NULL                 -- float32, little-endian, as returned (rounded to 5 places), not normalised
+) WITHOUT ROWID;
