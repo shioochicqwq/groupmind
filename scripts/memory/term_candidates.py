@@ -58,7 +58,8 @@ def normalize(query: str) -> str:
 
 
 def read_session(path: Path) -> list[dict]:
-    raw = subprocess.run(["zstd", "-dc", str(path)], capture_output=True, check=True).stdout
+    # Finished sessions are compressed; bothost's own harness home also has live, uncompressed ones.
+    raw = subprocess.run(["zstd", "-dc", str(path)], capture_output=True, check=True).stdout if path.suffix == ".zstd" else path.read_bytes()
     return [json.loads(line) for line in raw.decode("utf-8", "replace").split("\n") if line.strip()]
 
 
@@ -118,7 +119,9 @@ def result_meaning(text: str) -> str:
     try:
         data = json.loads(text)
     except json.JSONDecodeError:
-        return ""
+        # bothost's search_web answers in plain lines: "1. title", url, date, summary.
+        first = [x.strip() for x in text.split("\n2. ")[0].split("\n")]
+        return (first[3] if len(first) > 3 and first[3] else first[0].removeprefix("1. "))[:120] if first[0].startswith("1. ") else ""
     if not isinstance(data, dict):
         return ""
     inner = data.get("text")
@@ -151,7 +154,7 @@ def extract(paths: list[Path], auto_confirm: bool = True) -> dict:
             if record.get("type") != "tool/call":
                 continue
             data = record.get("data") or {}
-            name = data.get("name")
+            name = str(data.get("name") or "").removeprefix("mcp__qq__")   # the same tools when they come from bothost
             if name not in ("search_web", "memory_search"):
                 continue
             try:
@@ -253,7 +256,8 @@ def main() -> int:
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     ex = sub.add_parser("extract")
-    ex.add_argument("--sessions", nargs="*", type=Path, help="session jsonl.zstd paths (default: all under the qq-bot session dir)")
+    ex.add_argument("--sessions", nargs="*", type=Path, help="session.v4.jsonl[.zstd] paths (default: all under the qq-bot session dir)")
+    ex.add_argument("--session-root", type=Path, help="a harness sessions directory to scan instead, e.g. <bothost data_dir>/dsh-home/sessions")
 
     sub.add_parser("list")
 
@@ -271,7 +275,8 @@ def main() -> int:
 
     args = ap.parse_args()
     if args.cmd == "extract":
-        paths = args.sessions or sorted(SESSIONS.glob("*/session.v4.jsonl.zstd"))
+        paths = args.sessions or (sorted(args.session_root.glob("*/*/session.v4.jsonl*")) if args.session_root
+                                  else sorted(SESSIONS.glob("*/session.v4.jsonl.zstd")))
         print(json.dumps(extract(paths), ensure_ascii=False))
     elif args.cmd == "list":
         rows = [r for r in load_candidates() if r["status"] == "pending"]
