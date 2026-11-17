@@ -12,6 +12,7 @@ answers merged back with source timestamps. Nothing here depends on AstrBot.
   ask_segments(...)      one generateContent call per piece, prompt carries the source window
   merge(...)             one text call that answers from the per-piece notes
   answer(...)            the whole chain
+  watch(...)             what a tool shows: the answer, and for a Bilibili link what the page says in text
 
 Model sees at about 1 frame per second anyway, so 2 fps at 360p loses little for it while a
 10-minute piece shrinks to a few MiB.
@@ -20,16 +21,26 @@ from __future__ import annotations
 
 import base64
 import concurrent.futures as cf
+import ipaddress
 import json
 import math
 import os
 import re
 import shutil
+import socket
 import subprocess
 import tempfile
+import urllib.error
 import urllib.request
-from dataclasses import dataclass, field
+from collections.abc import Callable
+from dataclasses import dataclass, field, replace
 from pathlib import Path
+from urllib.parse import urlsplit
+
+try:
+    from . import bilibili
+except ImportError:   # loaded on its own, by path
+    import bilibili
 
 INLINE_LIMIT = 19 * 1024 * 1024  # leave headroom under the ~20 MiB request cap (base64 grows 4/3)
 INLINE_RAW_LIMIT = INLINE_LIMIT * 3 // 4
@@ -85,6 +96,20 @@ class Config:
     profile: dict = field(default_factory=lambda: dict(PROFILE))
 
 
+def public_url(url: str) -> str:
+    """The model may only name public http(s) pages: no local files, no hosts on this machine or its network."""
+    parts = urlsplit(url.strip())
+    if parts.scheme not in ("http", "https") or not parts.hostname or parts.username or parts.password:
+        raise VideoError("只接受公开的 http/https 视频链接")
+    for info in socket.getaddrinfo(parts.hostname, parts.port or 443, proto=socket.IPPROTO_TCP):
+        addr = ipaddress.ip_address(info[4][0])
+        if addr.version == 6 and addr.ipv4_mapped:
+            addr = addr.ipv4_mapped
+        if addr.is_private or addr.is_loopback or addr.is_link_local or addr.is_reserved or addr.is_multicast or addr.is_unspecified:
+            raise VideoError("禁止访问本机/内网地址")
+    return url.strip()
+
+
 def fmt_ts(sec: float) -> str:
     sec = int(round(sec))
     h, rem = divmod(sec, 3600)
@@ -120,6 +145,9 @@ def acquire(cfg: Config, source: str, workdir: Path) -> tuple[Path, dict]:
         return p, {"title": p.name}
     if not re.match(r"^https?://", source):
         raise VideoError("not a URL or an existing file")
+    direct = _direct_file(source, workdir, cfg.proxy)
+    if direct is not None:
+        return direct, {"title": "群里发的视频文件"}
     args = [cfg.ytdlp, "--no-playlist", "--no-warnings", "--restrict-filenames", "--ffmpeg-location", cfg.ffmpeg,
             "-f", "bv*[height<=720]+ba/b[height<=720]/bv*+ba/b", "--merge-output-format", "mp4",
             "--print-json", "-o", str(workdir / "source.%(ext)s")]
@@ -141,6 +169,37 @@ def acquire(cfg: Config, source: str, workdir: Path) -> tuple[Path, dict]:
     if not files:
         raise VideoError("yt-dlp finished without a video file")
     return files[0], meta
+
+
+VIDEO_MAGIC = ((4, b"ftyp"), (0, b"\x1a\x45\xdf\xa3"), (0, b"FLV"))   # MP4/MOV, Matroska/WebM, FLV
+DIRECT_LIMIT = 1024 * 1024 * 1024
+
+
+def _direct_file(url: str, workdir: Path, proxy: str = "") -> Path | None:
+    """A link straight to a video file (e.g. one sent in a QQ group: its server says application/octet-stream, which
+    yt-dlp does not take for a video) is downloaded as it is. None when the link is not a video file."""
+    import urllib.request
+    opener = urllib.request.build_opener(*([urllib.request.ProxyHandler({"http": proxy, "https": proxy})] if proxy else []))
+    headers = {"User-Agent": "Mozilla/5.0"}
+    try:
+        with opener.open(urllib.request.Request(url, headers={**headers, "Range": "bytes=0-15"}), timeout=15) as r:
+            head = r.read(16)
+    except (OSError, ValueError):
+        return None
+    if not any(head[at:at + len(magic)] == magic for at, magic in VIDEO_MAGIC):
+        return None
+    out = workdir / "source.mp4"
+    try:
+        with opener.open(urllib.request.Request(url, headers=headers), timeout=60) as r, out.open("wb") as f:
+            got = 0
+            while chunk := r.read(1 << 20):
+                got += len(chunk)
+                if got > DIRECT_LIMIT:
+                    raise VideoError("视频文件太大（超过 1 GB）")
+                f.write(chunk)
+    except OSError as e:
+        raise VideoError(f"视频文件下载失败：{type(e).__name__}") from e
+    return out
 
 
 def segment_seconds(total: float, bytes_per_sec: float, limit: int | None = None) -> int:
@@ -215,8 +274,13 @@ def _generate(cfg: Config, parts: list[dict]) -> tuple[str, dict]:
     url = f"{cfg.base_url.rstrip('/')}/v1beta/models/{cfg.model}:generateContent"
     body = json.dumps({"contents": [{"role": "user", "parts": parts}]}).encode()
     req = urllib.request.Request(url, body, {"Content-Type": "application/json", "Authorization": f"Bearer {cfg.api_key}"})
-    with urllib.request.urlopen(req, timeout=cfg.timeout) as r:
-        data = json.load(r)
+    try:
+        with urllib.request.urlopen(req, timeout=cfg.timeout) as r:
+            data = json.load(r)
+    except urllib.error.HTTPError as e:   # say which side failed: the video was fetched, the model did not take it
+        raise VideoError(f"video model answered HTTP {e.code}: {e.read()[:200].decode('utf-8', 'replace')}") from None
+    except OSError as e:
+        raise VideoError(f"video model not reachable: {e}") from None
     cand = (data.get("candidates") or [{}])[0]
     text = "".join(p.get("text", "") for p in (cand.get("content") or {}).get("parts", []) if not p.get("thought"))
     if not text.strip():
@@ -231,11 +295,21 @@ def ask_segment(cfg: Config, seg: Segment, total: float, question: str) -> tuple
 
 
 def answer(cfg: Config, source: str, question: str, start: float | None = None, end: float | None = None,
-           keep: Path | None = None) -> dict:
-    """The whole chain. Returns {answer, segments:[{start,end,bytes,notes}], meta, usage}."""
+           keep: Path | None = None, cookies: Callable[[str], str] | None = None) -> dict:
+    """The whole chain. Returns {answer, segments:[{start,end,bytes,notes}], meta, usage}.
+
+    cookies(folder): called when the download is refused; writes a cookies.txt for this site into the folder and
+    returns its path (empty: none to give). The download is then tried once more with it. Some sites answer a bare
+    downloader with an error and a browser's visitor cookies, or a login, are what they want to see."""
     workdir = Path(tempfile.mkdtemp(prefix="vr-", dir=keep))
     try:
-        src, meta = acquire(cfg, source, workdir)
+        try:
+            src, meta = acquire(cfg, source, workdir)
+        except VideoError:
+            jar = cookies(str(workdir)) if cookies and not cfg.cookies_file else ""
+            if not jar:
+                raise
+            src, meta = acquire(replace(cfg, cookies_file=jar), source, workdir)
         segs, total = prepare(cfg, src, workdir, start, end)
         meta["duration"] = round(total, 1)
         usage = {"prompt": 0, "completion": 0, "calls": 0}
@@ -265,6 +339,27 @@ def answer(cfg: Config, source: str, question: str, start: float | None = None, 
     finally:
         if keep is None:
             shutil.rmtree(workdir, ignore_errors=True)
+
+
+def headline(r: dict) -> str:
+    """What was watched, for the top of a tool's reply."""
+    meta = r["meta"]
+    head = f"视频：{meta.get('title') or '(无标题)'}；时长 {fmt_ts(meta.get('duration') or 0)}；分 {len(r['segments'])} 段看"
+    return head + (f"；UP/作者：{meta['uploader']}" if meta.get("uploader") else "")
+
+
+def watch(cfg: Config, url: str, question: str, start: float | None = None, end: float | None = None,
+          cookies: Callable[[str], str] | None = None) -> tuple[str, dict]:
+    """The reply of a tool and the model use. A Bilibili link also brings the page's text (description, tags, comments);
+    when the video itself cannot be fetched, that text is returned alone and says so."""
+    page = bilibili.page_text(url) if bilibili.is_ours(url) else ""
+    try:
+        r = answer(cfg, url, question, start, end, cookies=cookies)
+    except VideoError as e:
+        if not page:
+            raise
+        return f"画面没看成（{e}）。下面只有视频页面上的文字：画面和声音里讲了什么不知道，不要编。\n\n{page}", {}
+    return f"{headline(r)}\n\n{r['answer']}" + (f"\n\n【视频页面上的文字】\n{page}" if page else ""), r["usage"]
 
 
 def config_from_env() -> Config:

@@ -7,28 +7,12 @@ the model are never accepted, and URL hosts must resolve to public addresses.
 from __future__ import annotations
 
 import asyncio
-import ipaddress
-import socket
-from urllib.parse import urlsplit
 
 from astrbot.api import AstrBotConfig, logger
 from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, register
 
 from . import video
-
-
-def _public_url(url: str) -> str:
-    parts = urlsplit(url.strip())
-    if parts.scheme not in ("http", "https") or not parts.hostname or parts.username or parts.password:
-        raise video.VideoError("只接受公开的 http/https 视频链接")
-    for info in socket.getaddrinfo(parts.hostname, parts.port or 443, proto=socket.IPPROTO_TCP):
-        addr = ipaddress.ip_address(info[4][0])
-        if addr.version == 6 and addr.ipv4_mapped:
-            addr = addr.ipv4_mapped
-        if addr.is_private or addr.is_loopback or addr.is_link_local or addr.is_reserved or addr.is_multicast or addr.is_unspecified:
-            raise video.VideoError("禁止访问本机/内网地址")
-    return url.strip()
 
 
 def _chat_video_url(event: AstrMessageEvent) -> str:
@@ -83,21 +67,17 @@ class VideoReaderPlugin(Star):
             end_seconds(number): 只看这一段时的结束秒数；不限制填 -1
         """
         try:
-            source = _public_url(url) if (url or "").strip() else _chat_video_url(event)
+            source = video.public_url(url) if (url or "").strip() else _chat_video_url(event)
             if not source:
                 return "错误：没有给视频链接，当前消息里也没有视频"
-            source = _public_url(source)
+            source = video.public_url(source)
             start = start_seconds if start_seconds is not None and start_seconds >= 0 else None
             end = end_seconds if end_seconds is not None and end_seconds > 0 else None
             async with self._lock:
-                r = await asyncio.to_thread(video.answer, self.cfg, source, question, start, end)
+                text, _ = await asyncio.to_thread(video.watch, self.cfg, source, question, start, end)
         except video.VideoError as exc:
             return f"错误：{exc}"
         except Exception as exc:  # noqa: BLE001 - tool must return text
             logger.warning(f"video_reader failed: {exc!r}")
             return f"错误：看视频失败（{exc.__class__.__name__}）"
-        meta = r["meta"]
-        head = f"视频：{meta.get('title') or '(无标题)'}；时长 {video.fmt_ts(meta.get('duration') or 0)}；分 {len(r['segments'])} 段看"
-        if meta.get("uploader"):
-            head += f"；UP/作者：{meta['uploader']}"
-        return f"{head}\n\n{r['answer']}"
+        return text

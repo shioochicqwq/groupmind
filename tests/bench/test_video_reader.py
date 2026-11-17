@@ -60,5 +60,32 @@ def test_prepare_splits_and_keeps_source_times(tmp_path, monkeypatch):
 
 
 def test_local_paths_and_private_hosts_rejected():
-    main = (Path(video.__file__).parent / "main.py").read_text(encoding="utf-8")
-    assert "_public_url(url)" in main and "is_private" in main
+    for bad in ("/etc/passwd", "file:///etc/passwd", "http://127.0.0.1:8317/x", "http://user:pw@example.com/v"):
+        with pytest.raises(video.VideoError):
+            video.public_url(bad)
+
+
+def test_a_link_straight_to_a_video_file_is_downloaded_as_it_is(tmp_path):
+    import http.server, threading
+    body = b"\x00\x00\x00\x18ftypmp42" + b"\x00" * 2000
+
+    class H(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            data = body[:16] if self.headers.get("Range") else body
+            self.send_response(206 if self.headers.get("Range") else 200)
+            self.send_header("Content-Type", "application/octet-stream")
+            self.end_headers()
+            self.wfile.write(data)
+
+        def log_message(self, *a):
+            pass
+    srv = http.server.HTTPServer(("127.0.0.1", 0), H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        got = video._direct_file(f"http://127.0.0.1:{srv.server_port}/v", tmp_path)
+        assert got is not None and got.read_bytes() == body
+        (tmp_path / "x").mkdir()
+        body = b"<html>not a video</html>"
+        assert video._direct_file(f"http://127.0.0.1:{srv.server_port}/v", tmp_path / "x") is None
+    finally:
+        srv.shutdown()
