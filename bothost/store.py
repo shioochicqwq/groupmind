@@ -91,16 +91,47 @@ class Store:
                 (person, chat, name, ts, ts, cur.lastrowid))
             self._index([(cur.lastrowid, text)])
 
+    def retext(self, code: str, msg_id: str, text: str) -> bool:
+        """Replace the text of a live message (e.g. a picture placeholder by what the model saw in it), keeping the
+        keyword index and its BM25 statistics in step. False when there is no such message."""
+        row = self.db.execute("SELECT id, text FROM message WHERE source = ? AND source_msg_id = ?",
+                              (f"{self.platform}:{code}", _live_id(msg_id))).fetchone()
+        if row is None or row["text"] == text:
+            return row is not None
+        old, new = self.tokens(row["text"]), self.tokens(text)
+        with self.db:
+            self.db.execute("UPDATE message SET text = ? WHERE id = ?", (text, row["id"]))
+            self.db.execute("DELETE FROM message_fts WHERE rowid = ?", (row["id"],))
+            self.db.execute("INSERT INTO message_fts(rowid, body, dl) VALUES (?, ?, ?)", (row["id"], " ".join(new), len(new)))
+            self.db.executemany("UPDATE message_df SET df = df - 1 WHERE term = ?", [(t,) for t in set(old)])
+            self.db.executemany("INSERT INTO message_df VALUES (?, 1) ON CONFLICT(term) DO UPDATE SET df = df + 1", [(t,) for t in set(new)])
+            self.db.execute("DELETE FROM message_df WHERE df <= 0")
+            self.db.execute("UPDATE message_fts_meta SET v = v + ? WHERE k = 'total'", (len(new) - len(old),))
+        self._floor = None
+        return True
+
     # ---- reading ----
+    def shown_name(self, code: str, uid: str) -> str | None:
+        """The name an account was last shown under in this chat, else in any chat."""
+        person = self._person(uid)
+        if person is None:
+            return None
+        row = self.db.execute(
+            "SELECT pn.name FROM person_name pn JOIN chat c ON c.id = pn.chat_id WHERE pn.person_id = ? "
+            "ORDER BY (c.code = ?) DESC, pn.last_seen DESC LIMIT 1", (person, code)).fetchone()
+        return row[0] if row else None
+
     def is_from(self, code: str, msg_id: str, uid: str) -> bool:
         return bool(msg_id) and self.db.execute(
             "SELECT 1 FROM message WHERE source = ? AND source_msg_id = ? AND sender_id = ?",
             (f"{self.platform}:{code}", _live_id(msg_id), self._person(uid))).fetchone() is not None
 
-    def recent(self, code: str, n: int, before_ts: float = math.inf) -> list[sqlite3.Row]:
+    def recent(self, code: str, n: int, before_ts: float = math.inf, skip: str = "") -> list[sqlite3.Row]:
+        """The last n lines of a chat. skip: leave out lines whose id starts with this (one session of a private chat)."""
         rows = self.db.execute(
             "SELECT m.ts, m.nickname_at_time AS name, m.text FROM message m JOIN chat c ON c.id = m.chat_id "
-            "WHERE c.code = ? AND m.ts < ? ORDER BY m.order_key DESC LIMIT ?", (code, before_ts, n)).fetchall()
+            "WHERE c.code = ? AND m.ts < ? AND (? = '' OR substr(m.source_msg_id, 1, ?) != ?) ORDER BY m.order_key DESC LIMIT ?",
+            (code, before_ts, skip, len(_live_id(skip)), _live_id(skip), n)).fetchall()
         return rows[::-1]
 
     def uncoloured(self, code: str) -> int:

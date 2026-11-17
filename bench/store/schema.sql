@@ -146,3 +146,20 @@ CREATE TABLE IF NOT EXISTS embedding (
   model TEXT NOT NULL,
   vector BLOB NOT NULL                 -- float32, little-endian, as returned (rounded to 5 places), not normalised
 ) WITHOUT ROWID;
+
+-- What the bot learned about a person by itself (bothost/people.py): a nickname, a one-line impression, its attitude,
+-- another account of the same person. Rows are never deleted: a newer impression or attitude points the older one to
+-- its replacement, and undoing a row only marks it, so every change can be traced and rolled back.
+CREATE TABLE IF NOT EXISTS person_fact (
+  id INTEGER PRIMARY KEY,
+  person_id INTEGER NOT NULL REFERENCES person(id),
+  kind TEXT NOT NULL,                  -- alias | impression | attitude | same_as
+  value TEXT NOT NULL,
+  source TEXT NOT NULL,                -- tool | compaction | handoff | manual
+  chat_id INTEGER REFERENCES chat(id), -- where it was learned
+  evidence TEXT,                       -- what it was learned from (a note, a task id), never shown to the model as its own words
+  at REAL NOT NULL,
+  replaced_by INTEGER REFERENCES person_fact(id),
+  undone INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS person_fact_person ON person_fact(person_id);

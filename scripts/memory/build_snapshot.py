@@ -12,6 +12,8 @@ meanings are written; no account ids, no chat excerpts.
 from __future__ import annotations
 
 import json
+import re
+import sqlite3
 from pathlib import Path
 
 DATA = Path(__file__).resolve().parents[3] / "qqbot-data"
@@ -70,6 +72,34 @@ def load_terms() -> dict[str, dict]:
     return merged
 
 
+def alias_text(a) -> str:
+    """An alias from the labels: plain text, or {"text", "note"}."""
+    if isinstance(a, dict):
+        text, note = str(a.get("text", "")).strip(), str(a.get("note", "")).strip()
+        return f"{text}（{note}）" if text and note else text
+    return str(a).strip()
+
+
+def shown_names(con, ids: list[str], days: int = 60, top: int = 3) -> list[str]:
+    """The names a person was shown under in the chats lately, most used first. The model reads these in front of every
+    line, while the labels carry the name people were given when labelling; without them it cannot tell who is who.
+    Numbers inside a display name (some carry a QQ number) are taken out."""
+    if not ids:
+        return []
+    marks = ",".join("?" * len(ids))
+    since = con.execute("SELECT max(ts) FROM message").fetchone()[0] - days * 86400
+    rows = con.execute(
+        f"SELECT m.nickname_at_time, count(*) FROM message m JOIN person p ON p.id = m.sender_id "
+        f"WHERE p.platform_uid IN ({marks}) AND m.ts >= ? AND m.nickname_at_time IS NOT NULL AND m.nickname_at_time != '' "
+        f"GROUP BY m.nickname_at_time ORDER BY count(*) DESC", (*ids, since)).fetchall()
+    out = []
+    for name, _ in rows:
+        clean = re.sub(r"[（(]\s*\d{5,}\s*[)）]|\d{5,}", "", name).strip()
+        if clean and clean not in out:
+            out.append(clean)
+    return out[:top]
+
+
 def main() -> int:
     labels = json.loads((LABELS / "k-round1" / "merged-k-round1-v2.json").read_text(encoding="utf-8"))
     people = labels.get("people", [])
@@ -78,16 +108,23 @@ def main() -> int:
 
     lines = ["# 记忆快照（常驻）", ""]
     lines.append("## 人物")
-    lines.append("（来自第一轮打标，只覆盖部分群；没有列出的就是不知道，不要编。）")
+    lines.append("（来自第一轮打标，只覆盖部分群；没有列出的就是不知道，不要编。「群里显示为」是这个人最近在群里的名字，群消息前面写的就是它。）")
+    db = DATA / "store" / "memory.db"
+    con = sqlite3.connect(f"file:{db}?mode=ro", uri=True) if db.exists() else None
     for person in people:
         name = str(person.get("name", "")).strip()
         if not name:
             continue
-        aliases = [str(a).strip() for a in person.get("aliases", []) if str(a).strip()]
+        aliases = [t for t in (alias_text(a) for a in person.get("aliases", [])) if t]
         accounts = len(person.get("accounts", []))
+        known = {name, *(re.sub(r"（.*）$", "", a) for a in aliases)}
+        shown = [n for n in shown_names(con, [*person.get("accounts", []), *person.get("senders", [])]) if n not in known] if con else []
         extra = f"；外号：{'、'.join(aliases)}" if aliases else ""
+        shown_note = f"；群里显示为：{'、'.join(shown)}" if shown else ""
         account_note = f"；{accounts} 个账号" if accounts > 1 else ""
-        lines.append(f"- {name}{extra}{account_note}")
+        lines.append(f"- {name}{extra}{shown_note}{account_note}")
+    if con is not None:
+        con.close()
     if not people:
         lines.append("- （暂无）")
 

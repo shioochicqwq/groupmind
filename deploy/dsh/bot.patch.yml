@@ -14,6 +14,8 @@
             models:
               - id: !!js process.env.QQBOT_LLM_MODEL
                 contextWindow: !!js Number(process.env.QQBOT_LLM_CONTEXT ?? 262144)
+                # images reach the model only when it is declared to take them (bothost sets this with llm_images)
+                input: !!js "process.env.QQBOT_LLM_IMAGES === '1' ? ['text', 'image'] : ['text']"
 
     # Tools that live in the host process: sending to the group, searching the chat record.
     - id: mcp-qq
@@ -25,7 +27,9 @@
         headers:
           Authorization: !!js '`Bearer ${process.env.QQBOT_MCP_TOKEN}`'
         failOnStartupError: true
-        toolCallTimeoutMs: 120000   # a web look-up runs its own short conversation in the host
+        # A web look-up runs its own short conversation in the host. With session handoff (QQBOT_TOOL_TIMEOUT_MS set
+        # by bothost) a slow call goes on in a session that no longer holds the group, so it may take as long as it needs.
+        toolCallTimeoutMs: !!js Number(process.env.QQBOT_TOOL_TIMEOUT_MS ?? 180000)
 
 # Compaction (the bot writes its own note, compaction-persona.mjs) is added by bothost in a patch it writes at start,
 # because a plugin given by file needs an absolute path here.

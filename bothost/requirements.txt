@@ -1,3 +1,13 @@
+# What the bot host imports (bothost, the memory code under bench/, the page and video readers under plugins/).
+# Versions are the ones it was tested with.
 mcp>=2.3,<3
 uvicorn>=0.54
 websockets>=17
+starlette>=1.10
+numpy>=2.5
+jieba==0.42.1
+curl_cffi>=0.17
+patchright>=1.64
+beautifulsoup4>=4.15
+lxml>=6.1
+requests>=2.32
