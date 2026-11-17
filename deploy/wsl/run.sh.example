@@ -1,0 +1,13 @@
+#!/bin/bash
+# Start bothost in the foreground; the Windows task QQBot-bothost keeps this wsl.exe process alive and restarts it.
+# Keys are read from files in secrets/ (mode 600) so they never appear in the task definition or a log.
+B=/home/bot/qqbot
+cd $B/app
+export QQBOT_ONEBOT_TOKEN=$(cat $B/secrets/onebot.token)       # same as the WebSocket client's token in SnowLuma
+export QQBOT_LLM_API_KEY=$(cat $B/secrets/gateway.key)         # the group model's endpoint (llm_base_url)
+export QQBOT_LOOKUP_API_KEY=$(cat $B/secrets/deepseek.key)     # look-up helper (lookup_base_url); empty: the LLM key
+export QQBOT_SEARCH_API_KEY=$(cat $B/secrets/deepseek.key)     # DeepSeek search/fetch; without it there is no look_up
+export QQBOT_VIDEO_API_KEY=$(cat $B/secrets/gateway.key)       # Gemini-native endpoint (video_base_url)
+# QQBOT_STICKER_API_KEY: only when sticker_base_url is a different endpoint
+export BROWSER_EXECUTABLE=/usr/bin/google-chrome
+exec $B/venv/bin/python -m bothost $B/config.json >> $B/logs/bothost.log 2>&1
