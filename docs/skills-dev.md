@@ -1,5 +1,7 @@
 # Skill 开发指南（AstrBot）
 
+> **已过时（2026-11-16）**：本文是 AstrBot 时代的文档。机器人现在是 `bothost` + dsh，部署在 Windows PC 的 WSL 里。当前状态见 [handover-2026-11-16.md](handover-2026-11-16.md)，本文只作历史参考。
+
 > 用户计划自行编写 Skill；本仓库把 Skill 当代码管理：`skills/` 为源，安装到 `data/skills/`。
 > AstrBot 版本：4.29.1；技能格式与 OpenAI Codex / Claude Skills 兼容。
 

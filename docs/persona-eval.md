@@ -1,5 +1,7 @@
 # 人设评测记录
 
+> **已过时（2026-11-16）**：本文是 AstrBot 时代的文档。机器人现在是 `bothost` + dsh，部署在 Windows PC 的 WSL 里。当前状态见 [handover-2026-11-16.md](handover-2026-11-16.md)，本文只作历史参考。
+
 > 目的：在没有测试群的情况下，用 AstrBot WebChat（与 QQ 相同的 persona / provider / 对话管线）
 > 对「群友感」做可重复评估，驱动人设与参数迭代。
 > 脚本：[scripts/eval_persona.py](../scripts/eval_persona.py)；最近评测：2026-10-24。

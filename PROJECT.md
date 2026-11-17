@@ -1,178 +1,98 @@
 # PROJECT.md — QQ AI 群聊 Bot
 
 > 状态记录与架构入口。变更代码/配置后同步更新本文件；重要决策见 `DECISIONS.md`。
-> 最近更新：2026-11-01
+> **交接总入口：[docs/handover-2026-11-16.md](docs/handover-2026-11-16.md)**（结构、位置、迁移、未完成事项、规矩）。
+> 最近更新：2026-11-16。§1–§8 按当前状态重写；AstrBot 时代的旧版见 git 历史（提交 `5547da6` 及以前），§9 变更记录原样保留。
 
 ## 1. 项目目标与范围
 
-- **目标**：让一个 QQ 小号在群聊中提供「像群友一样的 AI 陪聊/整活」能力，支持随时更换 LLM 模型/提供商。
-- **当前范围**：单账号、群聊场景（@ 触发为主 + 后续低频主动插话）。
-- **明确不做**（当前阶段）：QQ 官方机器人接入、多平台、商业客服、语音/视频。
-- **最终形态**：部署到常驻 Windows PC 长期运行（AstrBot + SnowLuma，D-021，尚未部署）。
+- **目标**：让一个 QQ 小号在群聊里像群友一样聊天、整活。它要认得群里的人、记得群里的事，能自己查网页、看视频。
+- **两条线**：
+  1. **群聊机器人**：`bothost/`，当前在用户 PC 上做影子测试。
+  2. **长期记忆研究**：`bench/`、`docs/memory-*`、`docs/research/`，分支 `exp/humanlike-memory`。记忆分三个想法：原文准确回忆、模糊印象、像人（D-043、D-044）。
+- **当前范围**：单账号，只在一个群（代号 `ed14b7`）做影子测试，不往群里发消息。
+- **明确不做**：QQ 官方机器人接口、多平台、发表情包。
 
 ## 2. 架构
 
-> 协议端已于 2026-11-01 决定从 NapCat 改为 SnowLuma（D-021），配置已准备但**未部署、未实测**。
-> 本节下文和第 3、5 节里的 NapCat、`D:\` 路径与 VPS 内容是旧机器的历史记录。
-
 ```
-QQ 小号 ⇄ 桌面 QQ + SnowLuma v2.3.3（OneBot v11）
-        ⇄ 反向 WebSocket ws://127.0.0.1:6199/ws（token 鉴权）
-        ⇄ AstrBot 4.29.1（消息分发 / 人格 / 上下文 / 插件 / LLM 编排）
-        ├─ memory_beyond：事实记忆本子 + 上下文压缩（Markdown，data/plugin_data）
-        ├─ Skill：data/skills/<name>/SKILL.md（模型用文件工具按需读取）
-        └─ LLM Provider（DeepSeek 默认 + 聚合端点 5 模型）
+QQ 桌面客户端（小号）⇄ SnowLuma v2.4.2（OneBot v11，Windows）
+   ⇄ 反向 WS ws://127.0.0.1:6199/ws（token）
+   ⇄ bothost（WSL 发行版 qqbot）
+        ├─ 每群一个 dsh 0.2.1-rc.4 会话（sdk-minimal 内核；插件：会话接力 handoff.mjs、人设压缩）
+        ├─ MCP 工具（/mcp）：发言、记忆上下文与检索、记人/查人、查证 look_up、看视频 watch_video
+        ├─ memory.db：导入的群历史与上线后的消息同库（D-045），冻结版检索（D-046），人物事实表
+        └─ 模型：主模型 gemini-3.8-flash（经开发机网关，临时，D-056）；查证 deepseek-flash；视频 gemini-3.8-flash-high
 ```
 
-- **AstrBot** 作为反向 WS 服务端（`ws_reverse_port: 6199`）；NapCat 作为 WS 客户端连入。
-- **NapCat** 复用本机既有安装 `D:\Apps\NapCat`（原先用于 QQ 群图片抓取脚本），其 HTTP 服务 3000 端口和到 `127.0.0.1:8080` 的 HTTP 上报**保留不动**，只新增 `astrbot` WS 客户端。
-- **AstrBot 数据目录**：`D:\qqbot\data`（由 AstrBot 的 `ASTRBOT_ROOT` 默认=当前工作目录决定），整个目录已被 gitignore，迁 VPS 时整体迁移。
-- **Windows 本地**：`uv tool install astrbot`（全局工具，`C:\Users\Administrator\AppData\Roaming\uv\tools\astrbot`）。
-- **记忆**：memory_beyond（固定提交，MIT），人物记忆跨会话、全局记忆先关；压缩由插件接管（D-013）。
-- **文件工具**：`computer_use_runtime=local` + workspace 权限、禁执行（D-014），可读 QQ 发来的附件（落 `data/temp`）与技能文件，读不到 host。
-- **VPS 目标（D-011）**：原生 systemd，不使用 Docker —— `qqbot-napcat`（NapCat AppImage + Xvfb）与
-  `qqbot-astrbot`（uv 安装）两个服务，各自 `MemoryMax` 限内存；WebUI 只绑 `127.0.0.1`。
-  Docker Compose 仅保留为可选 fallback（`deploy/linux/docker-compose.yml`）。
+- bothost 代替了 AstrBot（D-045）：宿主进程只管收发消息、存库、调度，「怎么想」交给 dsh 这个通用 agent 内核。
+- 慢任务（看视频、要开浏览器的网页）走会话接力（D-052）：旧会话在后台做完，新会话接着聊群。会话由插件持有，退休时关闭。不按时长限制，只做卡死检测。
+- 人物表：人工标注的快照，加上机器人自己记下的人（D-054、D-055）。启动时、开新会话时、压缩时整张重建；中途新记的，作为【人物表追加】附在下一轮开头。
+- 部署：Windows 上跑 QQ 和 SnowLuma；bothost 和 dsh 跑在专用 WSL 发行版里（D-053），见 [deploy/wsl/README.md](deploy/wsl/README.md)。
 
 ## 3. 当前已实现（已实际验证）
 
-- [x] AstrBot v4.29.1 安装并启动成功（WebUI `http://127.0.0.1:6185`）
-- [x] 仓库骨架 + git 初始化
-- [x] `scripts/bootstrap_astrbot_config.py`：写入 OneBot v11 平台 + DeepSeek provider（key 走环境变量）+ 群聊上下文配置
-- [x] `scripts/patch_napcat_onebot.py`：给 NapCat 增加 `astrbot` WS 客户端（幂等）
-- [x] `deploy/windows/start-astrbot.ps1`、`deploy/windows/start-napcat.ps1`：本地启动脚本（加载 `.env`、避免 GBK 日志报错）
-- [x] NapCat 4.18.28 启动成功，WebUI（6099）就绪，已进入扫码登录等待状态
-- [x] AstrBot 反向 WS 端口 6199 已监听
-- [x] 小号 `<BOT_QQ>`（example）扫码登录成功；AstrBot 日志出现「aiocqhttp(OneBot v11) 适配器已连接」
-- [x] `send_private_msg` 实测成功（已发出测试消息），HTTP API / 好友列表可用
-- [x] NapCat 升级 **4.18.28 → 4.18.41**：修复 `PacketBackend 不支持 QQ 9.9.32-51246` 兼容错误（升级后 `PacketHandler 初始化成功`）
-- [x] VPS 部署资产：根目录 `docker-compose.yml`（AstrBot v4.29.1 + NapCat v4.18.41，WebUI 仅绑定 127.0.0.1）、`.env.example`、[deploy/linux/README.md](deploy/linux/README.md)、[docs/migration-vps.md](docs/migration-vps.md)
-- [x] `scripts/backup_data.py` 已实测可打包 `data/`（排除 temp/）
-- [x] 群聊整活初始策略已落地：人格 `example`（[config/personas/example.json](config/personas/example.json)）、群聊上下文 ICL、3% 主动插话、分段回复、20 条/分限流；调参说明见 [docs/group-chat-tuning.md](docs/group-chat-tuning.md)
-- [x] `scripts/apply_persona.py` 通过 Dashboard API 幂等写入人格（已实测：AstrBot 启动日志 `Loaded 2 personas`）
-- [x] 双 provider 已加载：DeepSeek（默认）+ 自定义聚合端点 5 个模型；WebChat 冒烟测试三种模型均正常回复（`scripts/smoke_llm.py`）
-- [x] 小号 `<BOT_QQ>` 重新扫码登录成功，AstrBot WS 适配器已连接
-- [x] 私聊/群聊测试链路已具备：QQ 消息 → NapCat → AstrBot（人设 example + 多模型）
-- [x] VPS 部署方案改为**原生 systemd（不使用 Docker）**：`deploy/linux/native/`（README + 两个 systemd 单元），迁移清单同步更新；Docker Compose 降级为可选 fallback（D-011）
-- [x] 一键体检脚本 `scripts/healthcheck.py`（跨平台，实测全 PASS）：端口、NapCat 登录/在线、平台适配器、6 provider、人格
-- [x] **联网搜索**：启用 `web_search_deepseek`（复用 DeepSeek key），WebChat 实测能检索并回答时效问题（如 V4 发布日期）
-- [x] **多模态**：图片 caption 用 `gemini-3.8-flash`（视觉模型），群聊上下文图片会转中文描述；聚合端点视觉输入已直连验证
-- [x] **Skill 体系**：仓库 `skills/` 源 + `scripts/install_skill.py` 安装；示例技能 `web-lookup` 已安装并生效；开发指南 [docs/skills-dev.md](docs/skills-dev.md)
-- [x] **插件层**：仓库 `plugins/` + `scripts/install_plugin.py`；`astrbot_plugin_strip_refs` 移除 QQ 里难看的 `<ref>` 引用标记（非流式路径已验证）
-- [x] **记忆本子（A-11）**：memory_beyond v1.3.7（固定提交 `0ec75bf…`）已安装；私聊写事实 → `/reset` → 追问能回忆；`/mb_status` 正常；人物记忆开、全局记忆关
-- [x] **文件工具（A-12）**：`computer_use_runtime=local` + workspace/禁执行；WebChat 实测读取 `data/temp` 文件成功，读 `D:\qqbot\PROJECT.md` 被拒；Skill 因此能真正读取 `SKILL.md`
-- [x] **Token 策略（A-13）**：ICL 200→100；memory_beyond 0.70 压缩 + gemini-flash 摘要；`context_report.py` 基线；实测单轮固定开销 ~7.8k（固定 ~3.7k + 工具声明 ~4.1k，缓存命中 ~7k）；`skills_like` 无收益已回退
-- [x] **Skill 教学/人味（A-13）**：[skill-tutorial.md](docs/skill-tutorial.md)、[corpus-and-style.md](docs/corpus-and-style.md)、`skills/style-humanizer` 已安装
-- [x] **网页读取（A-14）**：自研 `web_reader` 插件（本地抓取正文+链接、SSRF 防护）；实测能顺着 whatasiger.xyz 首页链接挑文章并概括长文（DeepSeek fetch 首页只有 130 字且无链接，已降为 fallback）
-- [x] **表情包数据集（A-15）**：自研只采集插件（无发送/无 LLM 工具）+ `data/sticker_dataset` + 标注/统计/评测脚本；示例图已跑通标注（委屈/生气）；**不发送表情包**
-- [x] **换机迁移打包（A-16）**：整理仓库与缓存，提供 `scripts/package_transfer.py` 与 [docs/transfer-to-new-machine.md](docs/transfer-to-new-machine.md)，支持源码包与非密钥数据包分层打包、校验与 Google Drive 中转恢复（D-019）
+- [x] bothost 多群并行宿主，dsh 作内核，工具走 MCP（A-39～A-41）
+- [x] 一个库：历史与新消息合并，跨群回忆；冻结版检索接入（A-41、A-43）
+- [x] 人设模型自己写压缩备忘；DeepSeek 用长会话，Gemini 每天开新会话（A-44、D-048）
+- [x] 查证帮手：在单独的对话里搜索、读网页，按层升级读取器（DeepSeek 接口 → 指纹请求 → Chrome），只交回结论（D-050）
+- [x] 看视频：YouTube、B 站、QQ 视频文件直链（D-051；直链下载 2026-11-16 加上）
+- [x] 会话接力：T1–T10 测试；连续接力 30 次后进程里只剩 1 个会话（D-052）
+- [x] PC 部署（WSL）和影子测试：2026-11-15 00:42 到 11-16 17:48，共 716 个回合，0 错误（D-053）
+- [x] 补群历史：从主号本地库导出后并入；冻结组单独封存（D-053）
+- [x] @ 显示真名；人物表带「群里显示为」；机器人自己认识人（D-054、D-055）
+- [x] 主模型直接看图；表情包另开调用看懂，不卡会话（D-056）
+- [x] 测试：`tests/bothost` 加 `tests/bench` 共 156 个通过（2026-11-16）
 
 ## 4. 进行中 / 待验证
 
-- [x] **QQ 私聊实测通过**（2026-10-24 17:10）：主号发「在吗」→ example 回「在呢，周六了还找我啥事」
-- [ ] **QQ 文件附件实测**：你在 QQ 私聊/群聊发 `.txt`/`.pdf`/`.docx`，验证「总结这个文件」可用（机制已用 `data/temp` 文件验证）
-- [ ] 群聊实测：用户确认现有群 `<GROUP_ID>` 不作为测试群；**暂缓**，待有合适的测试群再验收 @ 回复/上下文/主动插话
-- [ ] 常驻 Windows PC 部署（**用户暂缓**）：按 [transfer-to-new-machine.md](docs/transfer-to-new-machine.md) 执行，并验收 SnowLuma 链路（D-021）
-- [ ] VPS 原生部署：已不是当前路线（D-021）
+已知缺陷、没验证过的事、等用户定的事，都列在交接文档第 7 节。最要紧的三条：
+
+1. **工具调用超过 5 分钟一定失败**：Node 的 `headersTimeout` 是 300 秒，配置里的上限管不到这一层。修法已提出，等用户点头。
+2. **没交给后台的查证会挡住整个群**：建议这种情况下预算恢复 150 秒。
+3. **Gemini 主模型慢**：p50 18 秒，DeepSeek 是 2.4 秒。要不要换回 DeepSeek，等用户定。
 
 ## 5. 关键路径与端口
 
 | 项目 | 位置 / 值 |
 |---|---|
-| 仓库 | `D:\qqbot` |
-| AstrBot 数据 | `D:\qqbot\data`（cmd_config.json、data_v4.db、plugins…） |
-| AstrBot WebUI | `http://127.0.0.1:6185`（用户 `astrbot`，初始密码见首次启动日志，登录后必须修改） |
-| AstrBot OneBot 反向 WS | `0.0.0.0:6199`，路径 `/ws` |
-| NapCat 安装 | `D:\Apps\NapCat`（升级到 4.18.41，旧版备份 `D:\Apps\NapCat.bak-*`；QQNT `C:\Program Files\Tencent\QQNT`） |
-| NapCat WebUI | `http://127.0.0.1:6099/webui?token=<token>`（token 在 `D:\Apps\NapCat\config\webui.json`） |
-| NapCat OneBot 配置 | `D:\Apps\NapCat\config\onebot11_<QQ号>.json` |
-| 旧抓图脚本接口 | NapCat HTTP server `:3000`，HTTP 上报 `http://127.0.0.1:8080/qq_event`（保留） |
-| 小号已加入群 | `<GROUP_ID>`「<GROUP_NAME>」（54 人，**不作为测试群**） |
-| 记忆数据 | `data/plugin_data/astrbot_plugin_memory_beyond/memories/`（session/people/global） |
-| 记忆插件配置 | `data/config/astrbot_plugin_memory_beyond_config.json` |
-| 文件工具 | `computer_use_runtime=local`，workspace 权限、禁执行；附件落在 `data/temp` |
-| 网页读取 | 自研插件 `web_reader`（`plugins/astrbot_plugin_web_reader`）：本地抓取正文+链接，SSRF 防护 |
-| 表情包数据集 | `data/sticker_dataset/`（inbox/images/labels.jsonl，gitignored）；采集插件 `plugins/astrbot_plugin_sticker_collector` |
-| 外部插件清单 | [docs/external-plugins.md](docs/external-plugins.md) |
-| LLM Key | 本地 `.env` 的 `DEEPSEEK_API_KEY` / `MULTI_API_KEY`（gitignored） |
+| 代码（开发机） | `/home/<user>/projects/qq-bot`，分支 `exp/humanlike-memory`（大量未提交改动） |
+| 数据（开发机） | `/home/<user>/projects/qqbot-data/`（库、快照、人设、实验产出、账本、密钥文件），不进仓库 |
+| 运行（PC） | WSL `qqbot`，`/home/bot/qqbot/{app,config.json,run.sh,secrets,data,logs,venv,dsh}` |
+| SnowLuma（PC） | `D:\qqbot-bothost\snowluma`，WebUI `127.0.0.1:5099`，OneBot HTTP 3000 / WS 3001 |
+| bothost 监听 | `127.0.0.1:6199`：`/ws` 给 SnowLuma，`/mcp` 给 dsh |
+| 计划任务（PC） | `QQBot-SnowLuma`、`QQBotWsl-keepalive`、`QQBot-bothost` |
+| 模型网关（开发机） | `https://<GATEWAY_HOST>` → Caddy → `model-gateway:8318` → 模型网关 `:8317` |
+| 影子输出 | PC `data/shadow.jsonl`，并私聊转发给主号 |
+| 账本 | `qqbot-data/runs/ledger.jsonl`（255 行） |
 
-## 6. 模型切换能力
+## 6. 模型
 
-- 已配置两套 provider source（key 均以 `$ENV` 引用，不落盘）：
-  - `deepseek_source` → `https://api.deepseek.com/v1`，模型 `deepseek-chat`（**默认**）
-  - `multi_source` → `https://<GATEWAY_HOST>/v1`（OpenAI 兼容聚合端点），模型：
-    `gemini-3.8-flash`、`claude-sonnet-4-6`、`claude-opus-4-6`、`gpt-6-astra`、`gpt-6.1-sol`
-- 会话内切换：`/provider`、`/model`（管理员指令），按会话持久化；默认模型见
-  `agent_runner.config.model.provider_id`。
-- 管理员 ID：`astrbot`（Dashboard）与 `<ADMIN_QQ>`（QQ 主号，可用 `/provider`、`/model`、`/reset`）。
-- 默认模型 `deepseek`（短、便宜、稳），`fallback_provider_ids=["gemini-3.8-flash"]`（deepseek 失败时自动回退）。
-- 冒烟测试：`python scripts/smoke_llm.py --provider <id>`（经 AstrBot WebChat 全链路，见 runbook）；
-  `--followup` 可在同一会话发第二条消息，验证多轮上下文。
-- 人设评测：`python scripts/eval_persona.py --provider <id>`（10 个群聊场景 + 风格指标），
-  结果与结论见 [docs/persona-eval.md](docs/persona-eval.md)。
+| 角色 | 模型 | 走哪里 | 备注 |
+|---|---|---|---|
+| 群聊主会话 | `gemini-3.8-flash` | 开发机网关 | 临时（D-056）；DeepSeek 时用 `deepseek-flash` 和 DeepSeek 官方 API |
+| 查证帮手 | `deepseek-flash` | DeepSeek 官方 | 搜索和读页用 DeepSeek 的 `/v1/tools/search`、`/v1/tools/fetch` |
+| 视频 | `gemini-3.8-flash-high` | 网关的 Gemini 原生 `generateContent` | 视频以 base64 内联发送 |
+| 表情包 | 同主模型 | — | 按图片 sha256 缓存 |
+| 压缩备忘 | 同主模型（带人设） | — | D-048 |
 
-**验证矩阵（2026-10-24，WebChat 全链路实测 6/6）**
-
-| provider | 回复示例（群友口吻） | 状态 |
-|---|---|---|
-| `deepseek` | 群友<BOT_NAME>，闲聊摸鱼专用，别问我正经事 | ✅ |
-| `gemini-3.8-flash` | 这破天忽冷忽热的，纯在随机抽人感冒。 | ✅ |
-| `claude-sonnet-4-6` | 这鬼天气是在跟我过不去吧🙂 | ✅ |
-| `claude-opus-4-6` | 宅家躺尸，不接受反驳 | ✅ |
-| `gpt-6-astra` | 先睡到自然醒，剩下的醒了再说。 | ✅ |
-| `gpt-6.1-sol` | 先睡到自然醒，剩下的醒了再说。 | ✅ |
-
-- 多轮上下文：同一 WebChat 会话中「记住：我叫小明，喜欢打游戏」→「我叫什么？喜欢干嘛？」→
-  「小明啊，喜欢打游戏，刚说完就考我」，✅ 记忆生效。
-- 新增 provider：WebUI「模型提供商」添加 source + 模型，key 用 `$VAR` 环境变量。
-
-**上下文与记忆**：会话隔离（umo）、memory_beyond 事实记忆（people/session，全局暂关）、群聊 ICL **100** 条 +
-历史工具、图片描述、插件接管压缩；详见 [docs/context-and-memory.md](docs/context-and-memory.md)。
-Token 策略与实测见 D-016；外部插件版本见 [docs/external-plugins.md](docs/external-plugins.md)。
+切换模型改的是 PC 上的 `config.json`（`model`、`llm_base_url`、`llm_images`），改完重启 bothost。
 
 ## 7. 已知问题与技术债
 
-- 本地 NapCat 升级到 4.18.41 后，快速登录（`-q <uin>`）要求手机 QQ 验证，需改回扫码；换机/换版本后扫码是常规路径。
-- Windows 本机不能常驻，当前仅作开发验证；VPS 迁移需重新扫码登录（可能触发设备验证）。
-- AstrBot 升级会带来配置迁移风险：当前锁定 4.29.1，升级前备份 `data/`。
-- NapCat WebUI 默认无访问控制（`accessControlMode: none` 且监听 `::`），VPS 部署必须改用防火墙/仅内网监听（compose 已绑定 127.0.0.1）。
-- NapCat / QQ 必须以 NapCat 目录为工作目录启动，否则会在仓库根写出 `guild*.db`（启动脚本已 `Set-Location` 修正，gitignore 兜底）。
-- 主动插话依赖会话已存在（先 @ 一次产生对话），否则日志报 `No active conversation`。
-- **主动插话当前关闭**（`active_reply.enable=false`）：小号所在群不是测试群，避免误插话；有测试群后再开并填白名单。
-- 尚未做刷屏/被举报的线上观察，限流与主动插话概率需要实群调参。
-- **内存容量风险（2026-10-24 实测）**：AstrBot RSS ≈ 264 MB，QQ 相关进程合计 ≈ 1.8 GB（Electron 多进程），
-  NapCat 方案在 2 GB VPS 上会很紧；建议 ≥4 GB 或改官方 QQ 机器人（能力受限），见 D-011。
-- **搜索 key 特殊处理（临时）**：AstrBot 的 `websearch_deepseek_key` 不支持 `$ENV` 引用，bootstrap 会把
-  `DEEPSEEK_API_KEY` 的实际值写进 gitignored 的 `data/cmd_config.json`（provider key 仍是 `$ENV` 引用）。
-- 引用标记 `<ref>`：联网搜索会自动要求模型输出 `<ref>`，已通过插件在发送前剥离（WebChat 流式模式仍会显示，QQ 非流式路径已清理）。
-- **单轮固定开销偏高（实测 ~7.8k tokens）**：固定开销 ~3.7k + 工具声明 ~4.1k（本地文件/执行工具 schema 较大）；
-  DeepSeek 有 prompt cache 命中（/mb_status 显示 ~7k 缓存），实际成本低于全价。后续可考虑自定义只读文件工具替代 local runtime。
-- **memory_beyond 较新**（4 stars，v1.3.7）：接管压缩/身份标注，升级前必须备份并看 CHANGELOG；人物记忆跨群可见（隐私）。
-- **网页读取限制（A-14）**：`web_reader` 对静态站效果好；JS 渲染站/登录墙/强反爬拿不到正文，需要时再评估第三方 reader（D-017）；
-  所有人群聊可用，已做 SSRF 防护，后续可加域名白名单/频率限制。
-- **表情包数据集限制（A-15）**：只采集不发送；少数 `mface` 段会被 AstrBot 跳过采集不到；标注依赖 VLM 成本，需人工复核；
-  群友表情包版权/隐私仅本地保存（ID 哈希、不公开）。
-- **账号被踢下线会漏消息**：2026-10-24 18:29 example 被 QQ 踢下线，离线期间消息不进 AstrBot；
-  重登后用 NapCat `get_friend_msg_history` 拉取并手动补回（已补回两条）。小号勿多端同时登录。
-- 图片 caption 会额外消耗视觉模型 token；主动插话仍关闭，等测试群。
+- 见交接文档第 7 节。
+- 依赖 dsh 0.2.1-rc.4 的内部接口（`agents.create/resume`、`buildForkSeed`、`agent.cancel`），升级 dsh 要先在 PC 上重跑 `tests/bothost`。
+- 调用归属靠参数匹配；收尾要靠模型照格式写；超时或中断时机器人不会在群里说一句（见会话接力报告 v2 的风险清单）。
+- `term_candidates.py` 依赖会话日志里的 `search_web`，在 bothost 会话上接不上，未处理（A-44 补记三）。
+- 插件目录名还叫 `astrbot_plugin_*`，其实已由 bothost 直接 import。
 
 ## 8. 下一步计划
 
-> 2026-11-07：记忆研究和联网模块的待办以 [docs/handover-2026-11-07.md](docs/handover-2026-11-07.md) 为准；下面是部署与调优方面的旧计划。
-
-1. **本地调优优先（用户决定：VPS 暂缓，调好再说）**：
-   - 记忆/文件/搜索已就绪；继续按用户方向迭代上下文与省 token（D-016）；
-   - 支持用户自写 Skill：[skill-tutorial.md](docs/skill-tutorial.md) + [skills-dev.md](docs/skills-dev.md) + `install_skill.py`；
-   - 人味：按 [corpus-and-style.md](docs/corpus-and-style.md) 建评测集 + few-shot，再迭代 [persona-eval.md](docs/persona-eval.md)。
-2. **QQ 文件附件实测**：用户发 `.txt/.pdf/.docx` 验证「总结这个文件」（机制已在 WebChat 用 `data/temp` 文件验证）。
-3. **表情包数据集验收**：用户在 QQ 群/私聊发几张表情包，确认采集器入库；再跑标注/复核/评测
-   （[sticker-dataset.md](docs/sticker-dataset.md)）。**注意：当前不发送表情包**。
-4. 群聊验收：等有合适的测试群后，把群号填入 `active_reply.whitelist` 并开启 `active_reply.enable`，
-   按 [group-chat-tuning.md](docs/group-chat-tuning.md) 调参。
-4. VPS 部署（暂缓）：按 [deploy/linux/native/README.md](deploy/linux/native/README.md) 与
-   [migration-vps.md](docs/migration-vps.md) 执行；海外 VPS 注意 QQ 风控与内存上限（D-011）。
-5. 安全收尾：WebUI 初始密码改为强密码；LLM key 使用一段时间后轮换。
-6. 可选增强（按需）：表情包/戳一戳插件、self_learning（AGPL，D-015）、减少工具声明的自定义文件插件。
+1. 修 5 分钟的工具调用墙和查证预算（等用户点头）。
+2. 用户决定主模型用 Gemini 还是 DeepSeek，然后结束影子测试，真的往群里发。
+3. 开发机迁移：按交接文档第 5 节改网关地址和 ssh 隧道。
+4. 提交当前改动（等用户要求）。
+5. 记忆研究：冷启动和压缩时上色（D-047）接进 bothost；第三个想法的回忆策略层（D-044）。
 
 ## 9. 变更记录
 
@@ -540,3 +460,46 @@ Token 策略与实测见 D-016；外部插件版本见 [docs/external-plugins.md
 - **补记（2026-11-13）**：用户定了用人设摘要、DeepSeek 上用长会话（D-048）。插件和指令入了 `deploy/dsh/`，bothost 启动时写补丁挂上；`daily_session` 默认改为 `false`，新增 `compact_at_tokens`（暂定 30,000）、`compact_keep_tokens`（暂定 1,250）。按默认接法加小窗口测试补丁复查：压缩触发，回问 3/3。中途发现补丁里的插件名不能写成表达式，写了的话插件被静默禁用、会话不再压缩，所以改成由宿主写绝对路径。账本共 232 行。
 - **补记二（2026-11-13）**：用户定阈值照文章（约 11 万触发、留约 2 万原话），配置已改，上面的暂定值作废；联网结果要放到子会话里处理。探查了 dsh 自带的子会话工具：补丁插入即可运行，但不加限制时子会话和主会话同提示同工具、主会话自己也搜、通知引起的一轮和子会话用量宿主都没记。怎么挂还没定。账本共 233 行。
 - **补记三（2026-11-13）**：用户选了宿主同步跑。新增 `bothost/lookup.py`、`prompt_lookup.md`，主会话的联网工具换成 `look_up`，用量行多一个 `lookup`。合成两问：主会话未命中 2,609 和 1,251（主会话自己搜时是 19,706）。`term_candidates.py` 依赖会话日志里的 `search_web`，在 bothost 会话上接不上了，未处理。账本共 235 行。
+- **补记四（2026-11-13）**：按用户要求把今天的东西合进 dsh 网页端的测试会话并重启：联网换成 `look_up`，加了人设压缩的一对一版（`deploy/dsh/compaction-chat.*`），回忆排除 `0f51cf`。重启后服务和工具进程正常，日志无加载错误；没有在里面实际对话（未验证）。修了窗口小于阈值时比例大于 1 导致插件不加载的错。账本共 238 行。
+- **补记五（2026-11-13）**：用户要求消息附带时间。bothost 每轮开头加一行日期和星期（每条消息原本就带月日时分）；测试预设加 dsh 自带的时间插件；`memory_context` 的「现在」改为真实时间。账本共 240 行。
+- **补记六（2026-11-13）**：用户要求测试会话之间记忆互通。测试预设的会话从 dsh 会话日志抄进库里，算作一段一对一聊天 `dm`（`bothost/sessions.py`，D-049）；新会话的 `memory_context` 给出之前几次私聊的末尾，`memory_search` 搜得到全部原话；群聊机器人排除 `dm`。现有 2 个会话抄进 44 行，重复抄不增加。已重启 dsh 网页端；没有在真实会话里试过（未验证）。账本仍是 240 行。
+- **补记七（2026-11-13）**：测试会话查 rateyourmusic 没拿到。原因是读网页走的 DeepSeek 接口被拦，自家读取器没接进来。按用户决定改成自家读取器在前、DeepSeek 接口在最低一层（`plugins/astrbot_plugin_web_reader/tiers.py`、`bothost/web.py`），`look_up` 交回查证过程并可用编号追问（D-050）。合成两问答出，但专辑页本身仍有没过验证的情况，原因未查明。bot 的 Python 环境装了 patchright 和 curl_cffi。账本共 242 行。
+- **补记八（2026-11-13）**：读页顺序按用户决定改为 DeepSeek 接口 → 普通请求 → 浏览器指纹 → Chrome（补记七里「自家在前」是误读）。三个公开页面各读一次都读到，rateyourmusic 专辑页经浏览器 47.5 秒。dsh 网页端的配置已改好，按用户要求没有重启，测试会话还是旧行为。
+- **补记九（2026-11-13）**：本机读取的第一档由普通请求换成浏览器指纹请求（实测不比普通请求慢）；浏览器档没读到时写明卡在哪一步。rateyourmusic 专辑页在 Chrome 档冷读 19.7 秒、热读 13.5 秒，其中等网络空闲固定吃满 8 秒；DeepSeek 接口读这一页要 16 秒才失败。没有模型调用，账本仍是 242 行。
+- **补记十（2026-11-13）**：按用户选择做了三项读页提速：等正文稳定代替等网络空闲；记住 DeepSeek 接口读不了的站，之后直接走本机读取；「要从站内进」的站存到文件。已知的站写进读取器的 `sites.json`，随代码发布。rateyourmusic 专辑页从 47.5 秒降到 6–7 秒（各一次）。同一页约 3 秒内连读两次，第二次被拒，一分钟后恢复。没有重启 dsh 网页端。
+- **补记十一（2026-11-13）**：帮手每次调用的输出上限从 1,000 改为 4,000 token，结论上限从 800 改为 1,500 字，结论为空时不带工具再写一次（用户决定）。原因是测试会话里读到了 rym 日本榜却交回「没查到」、追问时列表被截断。改后合成一问完整列出 15 张。账本共 243 行。
+- **补记十二（2026-11-13）**：测试会话里查四张专辑的 rym 名次，失败原因是帮手在总榜里翻（第 2 页要登录），以及读页太密被拦（503）。按用户决定在 `sites.json` 加了 rym 提示、在帮手提示里加了「去读该项自己的页面」，先不限速。顺带修了：工具调用写成文字被当成结论、失败读取显示成「读到」、同一网址重复读、快超时时没写结论。重跑一次时帮手直接去读专辑页，但该站仍在拦，没有结论。账本共 244 行。
+- **补记十三（2026-11-13）**：看视频接进 bothost（D-051）：新增 `bothost/watch.py` 和 `watch_video` 工具，复用 D-041 的视频读取器；群提示加 `prompt_video.md`。YouTube 短片看对，102.6 秒里约 100 秒在等模型；之后 模型网关 上游对 `gemini-3.8-flash-high` 回 503。B 站在本机仍 412。dsh 网页端配置和人设已改好并备份，重启后生效。
+- **补记十四（2026-11-13）**：Chrome 档读 B 站视频页正常（11.8 秒），412 只出在 yt-dlp 下载。下载被拒时改为带机器人浏览器里该站点的 cookie 再试一次，B 站公开视频在本机能看了（第一分钟 115.7 秒）。新增 `bothost/login.py`，用来在机器人的浏览器里手动登录一次（D-051 更新二）。测试会话要重启后才用上。
+- **补记十五（2026-11-14）**：会话接力（D-052）。
+  - 审计结论在 `docs/research/2026-11-session-handoff-audit.md`：dsh 进程内能复制会话，旧会话的工具调用照常返回给它。
+  - 新增和改动：插件 `deploy/dsh/handoff.mjs`、`bothost/handoff.py`；`app.py` 按会话分开记录回合，并加了发言门禁和引用回复；`tiers.read_html` 加了升层钩子；`sites.json` 加了 `browser_first`（rym）。
+  - 开关 `handoff` 默认关。测试 T1–T10 通过。实测数字见 `docs/research/2026-11-session-handoff-report.md`，ledger 记了 5 行。
+- **补记十六（2026-11-14）**：按用户意见修改会话接力（D-052 更新）。
+  - 开着接力时不再按总时长限制，只保留卡死检测：10 分钟没有任何事件、也没有正在执行的工具调用，才取消那一个会话。
+  - 会话改由插件负责打开和关闭，退休的会话会被释放。连续接力 30 次后，进程里只剩 1 个会话。
+- **补记十七（2026-11-14）**：bothost 部署到用户 PC 的 WSL 里做影子测试；用主号本地库补了群历史（D-053）。
+  - 新增 `Config.shadow`、`bench/store/backfill.py`；接力插件改走回环 TCP；`bothost/requirements.txt` 补全了依赖。
+  - 在 PC 的 WSL 里跑通了 `tests/bothost` 的 16 个测试。
+  - 合并后 PC 上的记忆库：ed14b7 新增 1,869 条，新群 19d60e、257d47 共 99,474 条。冻结组导出后单独封存，没有并入。
+- **补记十八（2026-11-15）**：
+  - 影子测试加了私聊转发：机器人每准备说一句，就由小号私聊发给主号，附上群里最近 4 条消息（`Config.shadow_forward_to`）。
+  - 人物表补上「群里显示为」，外号按文字写（D-054）。
+- **补记十九（2026-11-15）**：机器人自己认识人（D-055）。
+  - 新增 `bothost/people.py`、`person_fact` 表，以及 `note_person`、`who_is` 两个工具。
+  - 压缩备忘可以带【人物】段，接力摘要带 `people` 字段，都会自动记下。
+  - 已经记下的人放进系统提示词，之后新记的用【人物表追加】附在下一轮开头。
+  - 已部署到 PC 的影子测试。
+- **补记二十（2026-11-15）**：
+  - @ 显示真名字。
+  - 人物表改为在启动、开新会话、压缩时重建。
+  - PC 主模型暂时换成 Gemini，图片和表情包直接交给主模型看，描述以「机器看的」写回记忆库（D-055 更新、D-056）。
+- **补记二十一（2026-11-16）**：
+  - **影子测试收数**：2026-11-15 00:42 到 11-16 17:48，共 716 个回合，0 错误。
+    - DeepSeek 186 回合，p50 2.4 秒；Gemini 530 回合，p50 18.1 秒、p95 90.1 秒。
+    - 真实接力 1 次（看视频，51.6 秒，交回的是引用回复）。
+    - 自己记下的人物事实 5 条。
+    - 数据在 `qqbot-data/runs/shadow-2026-11-15/`。
+  - **查出的问题**：一个回合挡了群 563 秒，是两次长查证。其中一次 5 分钟后返回 `fetch failed`：dsh 调工具的 HTTP 请求被 Node 的 `headersTimeout`（300 秒）截断。所以接力模式下，任何超过 5 分钟的工具调用都会失败。修法待用户确认。
+  - **视频直链**：QQ 发的视频文件，yt-dlp 不认 `application/octet-stream`，加了直接下载并检查文件头（`video.py` 的 `_direct_file`）。
+  - **交接文档**：新增 `docs/handover-2026-11-16.md` 和 `deploy/wsl/`（安装脚本、计划任务、配置模板、推送更新），README 改成入口页，§1–§8 按当前状态重写。`tests/bothost` 加 `tests/bench` 共 156 个通过。

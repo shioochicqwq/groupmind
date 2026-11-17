@@ -1,5 +1,7 @@
 # 迁移清单：Windows 本地 → Linux VPS（原生 systemd，无 Docker）
 
+> **已过时（2026-11-16）**：本文是 AstrBot 时代的文档。机器人现在是 `bothost` + dsh，部署在 Windows PC 的 WSL 里。当前状态见 [handover-2026-11-16.md](handover-2026-11-16.md)，本文只作历史参考。
+
 > **已不是当前路线（D-021）**：现在的目标是常驻 Windows PC + SnowLuma，见 [transfer-to-new-machine.md](transfer-to-new-machine.md)。本文仍是 NapCat 方案，仅作历史参考。
 
 > 原则：**整体迁移 AstrBot 的 `data/` 目录**，不在 VPS 上重新初始化（WebUI 密码、JWT、会话、插件配置都在里面）。

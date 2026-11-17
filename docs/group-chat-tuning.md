@@ -1,5 +1,7 @@
 # 群聊陪聊 / 整活调参指南
 
+> **已过时（2026-11-16）**：本文是 AstrBot 时代的文档。机器人现在是 `bothost` + dsh，部署在 Windows PC 的 WSL 里。当前状态见 [handover-2026-11-16.md](handover-2026-11-16.md)，本文只作历史参考。
+
 > 对应配置位于 `data/cmd_config.json`，由 `scripts/bootstrap_astrbot_config.py` 幂等写入。
 > 修改后重启 AstrBot 生效。人设由 `config/personas/example.json` + `scripts/apply_persona.py` 管理。
 

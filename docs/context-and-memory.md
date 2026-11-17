@@ -1,5 +1,7 @@
 # 上下文与记忆机制
 
+> **已过时（2026-11-16）**：本文是 AstrBot 时代的文档。机器人现在是 `bothost` + dsh，部署在 Windows PC 的 WSL 里。当前状态见 [handover-2026-11-16.md](handover-2026-11-16.md)，本文只作历史参考。
+
 > 目标：让 bot 在私聊/群聊里「记得住人、接得上梗」，同时控制 token。
 > 实现：AstrBot 会话历史 + 群聊 ICL + **memory_beyond 插件**（事实记忆 + 压缩）。
 > 决策：`DECISIONS.md` D-013 / D-016；插件版本见 [external-plugins.md](external-plugins.md)。

@@ -1,5 +1,7 @@
 # 本地运行手册（Windows）
 
+> **已过时（2026-11-16）**：本文是 AstrBot 时代的文档。机器人现在是 `bothost` + dsh，部署在 Windows PC 的 WSL 里。当前状态见 [handover-2026-11-16.md](handover-2026-11-16.md)，本文只作历史参考。
+
 ## 前置条件
 
 > 协议端已从 NapCat 改为 SnowLuma（D-021）。本手册的 SnowLuma 步骤依据 v2.3.3 文档与源码编写，**尚未在 Windows 上实测**。

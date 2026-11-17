@@ -1,5 +1,7 @@
 # 迁移到另一台机器（打包/恢复说明）
 
+> **已过时（2026-11-16）**：本文是 AstrBot 时代的文档。机器人现在是 `bothost` + dsh，部署在 Windows PC 的 WSL 里。当前状态见 [handover-2026-11-16.md](handover-2026-11-16.md)，本文只作历史参考。
+
 > 本机不能常驻时，把源码与文档打成一个 zip，上传网盘，到新机器解压恢复。
 > 打包脚本：`python scripts/package_transfer.py`（默认输出到仓库同级的 `qqbot-packages/`）。
 

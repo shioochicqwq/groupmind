@@ -1,5 +1,7 @@
 # Skill 开发教程（从 0 到能用 + 人味）
 
+> **已过时（2026-11-16）**：本文是 AstrBot 时代的文档。机器人现在是 `bothost` + dsh，部署在 Windows PC 的 WSL 里。当前状态见 [handover-2026-11-16.md](handover-2026-11-16.md)，本文只作历史参考。
+
 > 配套：[skills-dev.md](skills-dev.md)（格式/工具清单）、[skills/web-lookup](../skills/web-lookup/SKILL.md)、
 > [skills/style-humanizer](../skills/style-humanizer/SKILL.md)、[scripts/install_skill.py](../scripts/install_skill.py)。
 > 前提：已开启 `computer_use_runtime=local`（只开放 workspace），否则模型读不到 `SKILL.md` 正文，技能不会真正生效。

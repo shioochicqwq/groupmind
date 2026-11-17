@@ -1,5 +1,7 @@
 # 外部插件清单（版本锁定 / 安装 / 回滚）
 
+> **已过时（2026-11-16）**：本文是 AstrBot 时代的文档。机器人现在是 `bothost` + dsh，部署在 Windows PC 的 WSL 里。当前状态见 [handover-2026-11-16.md](handover-2026-11-16.md)，本文只作历史参考。
+
 > 原则：外部插件安装到 `data/plugins/`（gitignored），但**必须锁定提交并记录在此**；
 > 升级前备份 `data/`，升级后跑 healthcheck + 关键回归。
 
