@@ -1,0 +1,39 @@
+{
+  "_note": "What the reader knows about particular sites before it has learned anything itself. A running reader adds what it learns to its own file in the data folder; entries found there worth keeping are copied here so they ship with the reader. Host names only, without a leading www.",
+  "front_door": {
+    "_note": "Sites that refuse a deep link opened cold but serve it to a visitor coming from inside the site: the reader goes in with the home page as Referer.",
+    "hosts": [
+      "rateyourmusic.com"
+    ]
+  },
+  "local_first": {
+    "_note": "Sites a remote reading service (the DeepSeek fetch endpoint) cannot read and this reader can: skip the service.",
+    "hosts": [
+      "rateyourmusic.com"
+    ]
+  },
+  "browser_first": {
+    "_note": "Sites whose pages a plain or fingerprinted request does not get (a check page, or an empty page that needs scripts): go straight to the browser. A reader adds a site here after the request tier failed on it and the browser read it.",
+    "hosts": [
+      "rateyourmusic.com"
+    ]
+  },
+  "notes": {
+    "_note": "Hints for a model reading a site, given when a question names the site or links to it. names: how people refer to it.",
+    "sites": {
+      "rateyourmusic.com": {
+        "names": [
+          "rateyourmusic",
+          "rate your music",
+          "rym"
+        ],
+        "notes": [
+          "专辑页（/release/album/艺人/专辑名/）页首写着这张专辑的年度名次和总名次，例如「Ranked #3 for 2005, #185 overall」，还有均分、评分人数、流派和描述词。查某张专辑的名次或评分，直接读它的专辑页，不要去榜单里翻。",
+          "专辑页网址一般是小写、空格换成连字符，例如 /release/album/nujabes/modal-soul/。拼不准时先用 search_web 加 site:rateyourmusic.com 找到网址。",
+          "榜单（/charts/...）只能读第 1 页，也就是前 40 名，第 2 页起要登录。",
+          "短时间内读太多页会被拦（HTTP 503），够回答就停。"
+        ]
+      }
+    }
+  }
+}

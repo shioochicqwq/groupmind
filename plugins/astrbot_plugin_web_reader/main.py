@@ -20,7 +20,8 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, register
 
 from . import browser as br
-from .reader import BlockedURL, BotWall, FetchError, extract, fetch, fetch_impersonate, format_result
+from .reader import BlockedURL, FetchError, extract, format_result
+from .tiers import read_html
 
 
 @register(
@@ -49,7 +50,8 @@ class WebReaderPlugin(Star):
             challenge_wait=float(c.get("challenge_wait_seconds", 45)),
         )
         self.browser = br.Browser(br.BrowserConfig(
-            profile_dir=profile, executable_path=c.get("browser_executable", ""), **common))
+            profile_dir=profile, executable_path=c.get("browser_executable", ""),
+            sites_file=str(Path(profile).parent / "web_reader_sites.json"), **common))
         # second engine for the fetch tier only; started on first use
         self.fox = None
         if self.browser_enabled and bool(c.get("camoufox_enabled", True)) and br.available("camoufox"):
@@ -63,54 +65,9 @@ class WebReaderPlugin(Star):
         if self.fox is not None:
             await self.fox.close()
 
-    @staticmethod
-    def _too_thin(ctype: str, raw: bytes, url: str) -> bool:
-        """An HTML page whose main text is nearly empty: JS-rendered or a disguised check page."""
-        if "html" not in ctype.lower():
-            return False
-        try:
-            return extract(raw, url, 0, 2000)["total"] < 200
-        except Exception:  # noqa: BLE001
-            return False
-
     async def _read_html(self, url: str) -> tuple[str, str, bytes, str]:
-        """(final_url, content_type, body, how) through the escalation tiers. A tier that returns
-        a nearly empty HTML page counts as not good enough when the browser can still try."""
-        thin = None
-        try:
-            final, ctype, raw = await asyncio.to_thread(fetch, url)
-            if not (self.browser_enabled and self._too_thin(ctype, raw, final)):
-                return final, ctype, raw, ""
-            thin = (final, ctype, raw, "")
-        except BotWall:
-            pass
-        try:
-            final, ctype, raw = await asyncio.to_thread(fetch_impersonate, url)
-            if not (self.browser_enabled and self._too_thin(ctype, raw, final)):
-                return final, ctype, raw, "（经浏览器指纹请求读取）"
-            thin = thin or (final, ctype, raw, "（经浏览器指纹请求读取）")
-        except BotWall:
-            pass
-        except FetchError as exc:
-            if "未安装" not in str(exc):
-                logger.info(f"web_reader impersonate tier: {exc}")
-        if not self.browser_enabled:
-            raise BotWall("网站有反爬验证，且未启用浏览器")
-        for b, how in ((self.browser, "（经浏览器读取）"), (self.fox, "（经第二浏览器读取）")):
-            if b is None:
-                continue
-            try:
-                final, html, passed = await b.fetch_rendered(url)
-            except PermissionError:
-                raise
-            except Exception as exc:  # noqa: BLE001 - this engine failed; the next may not
-                logger.info(f"web_reader browser tier ({b.cfg.engine}): {exc!r}")
-                continue
-            if passed:
-                return final, "text/html", html.encode("utf-8"), how
-        if thin:
-            return thin
-        raise BotWall("网站的人机验证没有通过（可能是当前网络 IP 被拦，或访问太频繁）")
+        """(final_url, content_type, body, how) through the escalation tiers (tiers.py)."""
+        return await read_html(url, (self.browser, self.fox) if self.browser_enabled else ())
 
     @filter.llm_tool(name="web_reader")
     async def web_reader(

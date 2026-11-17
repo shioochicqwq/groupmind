@@ -42,6 +42,15 @@ from dataclasses import dataclass, field
 from urllib.parse import urlsplit
 
 try:
+    from .sites import Sites
+except ImportError:  # loaded as a lone file (tests, probe scripts): take the sibling module by path
+    import importlib.util as _iu
+    _spec = _iu.spec_from_file_location("web_reader_sites", os.path.join(os.path.dirname(__file__), "sites.py"))
+    _sites = _iu.module_from_spec(_spec)
+    _spec.loader.exec_module(_sites)
+    Sites = _sites.Sites
+
+try:
     from patchright.async_api import async_playwright
 except ImportError:  # pragma: no cover - optional
     async_playwright = None
@@ -257,6 +266,8 @@ class BrowserConfig:
     challenge_wait: float = 45.0
     min_host_interval: float = 3.0  # seconds between page loads on one host; fast loading trips rate checks
     allow_hosts: frozenset = frozenset()  # tests only (local fixture server)
+    sites_file: str = ""            # where learned site facts are kept (sites.py); empty: memory only
+    settle_max: float = 6.0         # after loading, wait at most this long for the text to stop changing
 
 
 class Browser:
@@ -272,8 +283,9 @@ class Browser:
         self._display_no = -1
         self._fox = None
         self._last_nav: dict[str, float] = {}
-        self._front_door: set[str] = set()  # hosts that refuse a cold deep link but serve it from inside the site
+        self.sites = Sites(cfg.sites_file)  # "front_door": hosts that refuse a cold deep link but serve it from inside the site
         self.mode = ""  # how the browser ended up running: "headed", "xvfb" or "headless"
+        self.why = ""   # where the last load that did not get the page stopped, for the caller to report
 
     async def _display(self, env: dict) -> bool:
         """Make sure a visible window has somewhere to go. True when headed mode can be used."""
@@ -502,11 +514,17 @@ class Browser:
         try:
             status = await self._navigate(page, url, **how)
             last["status"] = last["status"] or status
+            step = "从站内跳转" if how.get("from_page") else ("首页" if urlsplit(url).path in ("", "/") else "直接打开")
             if await self._refused(page, last["status"]):
+                self.why = f"{step}时被拒（HTTP {last['status']}）"
                 return "refused"
             if not await self.pass_challenge(page):
+                self.why = f"{step}时人机验证 {self.cfg.challenge_wait:.0f} 秒内没过（HTTP {last['status']}）"
                 return "challenge"
-            return "refused" if await self._refused(page, last["status"]) else "ok"
+            if await self._refused(page, last["status"]):
+                self.why = f"{step}时验证后仍被拒（HTTP {last['status']}）"
+                return "refused"
+            return "ok"
         finally:
             page.remove_listener("response", note)
 
@@ -520,7 +538,7 @@ class Browser:
         remembered, and later loads there name the home page as Referer from the start."""
         p = urlsplit(url)
         host, home = p.hostname or "", f"{p.scheme}://{p.netloc}/"
-        state = await self._arrive(page, url, referer=home if host in self._front_door else "")
+        state = await self._arrive(page, url, referer=home if self.sites.has("front_door", url) else "")
         if state != "refused" or (p.path in ("", "/") and not p.query):
             return state == "ok"
         if await self._arrive(page, home) != "ok":
@@ -528,21 +546,31 @@ class Browser:
         await page.mouse.move(420, 310, steps=8)
         if await self._arrive(page, url, from_page=True) != "ok":
             return False
-        self._front_door.add(host)
+        self.sites.add("front_door", url)
         return True
 
-    async def fetch_rendered(self, url: str, settle_ms: int = 1500) -> tuple[str, str, bool]:
+    async def settle(self, page) -> None:
+        """Wait until the page's text stops changing (two readings 0.5 s apart give the same length), at most
+        `settle_max` seconds. Waiting for the network to go quiet never ends on pages with ads and trackers."""
+        last, t0 = -1, time.time()
+        while time.time() - t0 < self.cfg.settle_max:
+            try:
+                n = await page.evaluate("document.body ? document.body.innerText.length : 0")
+            except Exception:  # noqa: BLE001 - a navigation is still under way
+                n = -1
+            if n > 0 and n == last:
+                return
+            last = n
+            await page.wait_for_timeout(500)
+
+    async def fetch_rendered(self, url: str) -> tuple[str, str, bool]:
         """(final_url, html, passed) for a page loaded in the browser."""
         if not request_allowed(url, self.cfg.allow_hosts):
             raise PermissionError("禁止访问本机/内网地址")
         page = await self.new_page()
         try:
             passed = await self.load(page, url)
-            try:
-                await page.wait_for_load_state("networkidle", timeout=8000)
-            except Exception:  # noqa: BLE001 - busy pages never go idle
-                pass
-            await page.wait_for_timeout(settle_ms)
+            await self.settle(page)
             if passed:  # some sites load the page first and only then redirect to their check
                 passed = await self.pass_challenge(page)
             return page.url, await page.content(), passed

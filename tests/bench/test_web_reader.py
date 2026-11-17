@@ -265,7 +265,7 @@ def test_refused_home_page_is_not_retried():
     assert asyncio.run(b.load(page, "https://site.example/")) is False
     assert len(page.log) == 1
     assert asyncio.run(b.load(page, "https://site.example/deep")) is False
-    assert len(page.log) == 3 and not b._front_door
+    assert len(page.log) == 3 and not b.sites.has("front_door", "site.example")
 
 
 def test_dead_display_leftovers_do_not_count_as_in_use(tmp_path):
