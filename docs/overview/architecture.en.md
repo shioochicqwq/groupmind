@@ -120,7 +120,7 @@ memory_search(query, groups, as_of):
 
 **How it degrades on failure**: when the vector service is unreachable, only the two keyword routes run, and the result says so; when the color index fails altogether, everything falls back to per-message keyword search. The tool's description tells the model: "quotes must match the original; if nothing is found, say you don't recall — don't make things up".
 
-**The current gap**: new messages after going live are not colored automatically. The design calls for a sub-session to read the store and color them "when the main session cold-starts or compacts" (D-047), but **only the counting is wired in**: at those two moments the host records how many messages are still uncolored; coloring itself is not wired into bothost. So in the live system, imported history goes through the full frozen retrieval, while messages after going live can only be found by per-message keyword search.
+**Coloring after going live** (D-047): when the main session compacts or cold-starts, the host colors the new messages in the background, reading them from the store ([`bothost/colouring.py`](../../bothost/colouring.py), [`bench/store/online.py`](../../bench/store/online.py)); none of this appears in the main session's history. It follows the frozen version: the same prompt, the same model, batches of 150 overlapping the previous batch by 20, continuing after the frozen version's last batch, so overlap de-duplication works across the seam. Each coloring job is stored as a color run of its own (`source_file` starting with `online:`), append-only and removable as a whole; the document vectors for the new colors are computed before anything is written and stored in the same transaction as the colors, so a failed job writes nothing and the messages are due again next time. A compaction colors only full batches, since the rest is still in front of the model; a new session colors everything that is due. Messages from the last 30 minutes wait, because sticker and image descriptions written by the machine may still change their text. Recall notices the new run on its next search and rebuilds that group's index; after that only the uncolored tail is searched message by message. A group without frozen colors gets only its messages since going live colored, not its imported history. **Off by default**: with `colour_model` empty the host only counts; it has not been run on real data.
 
 ### 1.5 Knowing people
 
@@ -189,10 +189,10 @@ Images are sent to the model as attachments with the turn (at most 6), numbered 
 
 | Moment | What happens | Prefix cache |
 |---|---|---|
-| Process start (the first turn, or the next turn after the process was stopped for 30 idle minutes) | Start the group's dsh process; open the session; **update the people/meme tables** | Treated as lost |
-| New session (the first one, or a new day when "one session per day" is on) | Prepend the last 40 raw messages as a recap; **update the people/meme tables** | Lost |
+| Process start (the first turn, or the next turn after the process was stopped for 30 idle minutes) | Start the group's dsh process; open the session; the system prompt (with the meme snapshot) is fixed here; **update the people table** | Treated as lost |
+| New session (the first one, or a new day when "one session per day" is on) | Prepend the last 40 raw messages as a recap; **update the people table** (the meme snapshot stays); color the due messages in the background (end of section 1.4) | Lost |
 | Ordinary turn | Only append new input at the end; newly known people go into 【人物表追加】, background results into "internal notes" | **Hit** |
-| Compaction | Earlier conversation is replaced by the memo the model writes; then **update the people/meme tables**; record how many messages are not yet colored | Lost |
+| Compaction | Earlier conversation is replaced by the memo the model writes; then **update the people table** (the meme snapshot stays); record how many messages are not yet colored, and color the full batches in the background | Lost |
 | Handoff | Fork a new session with the same prefix as the old one (section 3) | Hit |
 
 Why isn't the people table updated whenever something changes? Because it is a section of the system prompt (`qq:people`, registered by [`deploy/dsh/handoff.mjs`](../../deploy/dsh/handoff.mjs)) whose text is recomputed for every request. Any change alters the whole prefix and invalidates the cache. So the host calls `set_people` to rewrite it only at the three moments when "the prefix is lost anyway"; people learned in between are placed at the start of the next turn's input as 【人物表追加】 ("people table additions"). At the next rebuild, these additions are folded into the full table.
@@ -312,7 +312,7 @@ With handoff enabled, the host no longer sets an overall time limit per turn and
 
 **Known defects**:
 
-- **Tool calls longer than 5 minutes always fail**: dsh calls the host's tools over HTTP, and Node's built-in header timeout is 300 seconds; the "tool calls may take up to 1 hour" setting does not reach that layer. Videos that take more than 5 minutes to process fail this way.
+- **Tool calls longer than 5 minutes failed (fixed 2026-11-18)**: dsh calls the host's tools over HTTP and the host answers only when the tool is done; Node's built-in fetch waits at most 300 seconds for response headers, and the "tool calls may take up to 1 hour" setting does not reach that layer, so videos that took more than 5 minutes to process failed this way. The host plugin ([`deploy/dsh/handoff.mjs`](../../deploy/dsh/handoff.mjs)) now sends requests to the host's MCP address through a connection that waits as long as the tool limit, and leaves every other request, the model API included, as it was. Verified against a local server that answers after 330 seconds; no call longer than 5 minutes has run in a real deployment yet.
 - **A long fact-check without handoff blocks the group**: a fact-check that only searches without reading pages keeps occupying the group-chat session (one turn took 563 seconds in practice).
 - **Call attribution relies on matching arguments**: if two sessions call the same tool with identical arguments, the call may be attributed to the wrong one.
 - It depends on internal interfaces of dsh 0.2.1-rc.4 (the fork seed, cancellation, creating user messages); the old session's wrap-up depends on the model following the format.
@@ -487,8 +487,9 @@ The reason for replacing image descriptions: recall needs to be able to find "wh
 ## 7. Status and limitations
 
 - **Implemented and running in shadow testing**: per-group sessions with persona compaction, memory retrieval, knowing people, fact-checking, watching videos, understanding stickers, session handoff.
-- **Research prototypes, not wired in**: coloring after going live (only counting is wired in), the event layer, impression formation, the recall-policy layer.
-- **Not verified**: actually posting, proactive speaking (does not exist), the frozen version on an independent test set, human blind evaluation of "human-likeness", tool calls longer than 5 minutes.
+- **Implemented, off by default, not run on real data**: coloring after going live.
+- **Research prototypes, not wired in**: the event layer, impression formation, the recall-policy layer.
+- **Not verified**: actually posting, proactive speaking (does not exist), the frozen version on an independent test set, human blind evaluation of "human-likeness", tool calls longer than 5 minutes in a real deployment.
 - **Deployment is very unfriendly**: it has only run in our own Windows + WSL environment, relying on scheduled tasks and a script for pushing updates by hand; paths, accounts and the model gateway all carry traces of our own environment.
 
 ## 8. Principles worth taking away
@@ -529,7 +530,7 @@ flowchart TD
 | Switch to a thin host + general-purpose kernel; history and new messages in one store | D-045 |
 | SQLite storage; FTS5 when going live | D-030 |
 | The frozen retrieval and its revisions; the recall tool uses the frozen version | D-028, D-029, D-032, D-046 |
-| When to color after going live (not wired in) | D-047 |
+| When to color after going live, and how the colors are stored | D-047 |
 | Compaction summaries written by the persona-bearing model; session lifetime | D-048 |
 | A persona-free fact-checking helper; tiered page reading (the D-050 update is authoritative) | D-040, D-042, D-050 |
 | Watching videos | D-041, D-051 |
