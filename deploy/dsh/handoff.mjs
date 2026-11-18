@@ -35,6 +35,31 @@ const { buildForkSeed } = await load('@deepseek-ai/dsh-session/fork')
 const { createUserMessage } = await load('@deepseek-ai/dsh-llm')
 const { admitEncodedImages } = await load('@deepseek-ai/dsh-attachment')
 
+/**
+ * Tool calls longer than five minutes. The MCP client sends each call through Node's global `fetch`, and the host
+ * answers a call only when the tool is done (one JSON response, no stream), so undici's default 300 s wait for the
+ * response headers ended every longer call, whatever `toolCallTimeoutMs` said. With handoff (QQBOT_TOOL_TIMEOUT_MS
+ * set) requests to the host's MCP origin go through an agent that waits that long; everything else, the model API
+ * included, keeps the dispatcher dsh installed (proxy routing and default timeouts).
+ */
+export async function lengthenToolCalls(undici, mcpUrl, timeoutMs) {
+  if (!mcpUrl || !(timeoutMs > 300_000)) return undefined
+  const origin = new URL(mcpUrl).origin
+  const rest = undici.getGlobalDispatcher()
+  const slow = new undici.Agent({ headersTimeout: timeoutMs + 60_000, bodyTimeout: timeoutMs + 60_000 })
+  class ToolRoute extends undici.Dispatcher {
+    dispatch(opts, handler) {
+      return (new URL(String(opts.origin)).origin === origin ? slow : rest).dispatch(opts, handler)
+    }
+    close(...args) { return slow.close(...args) }   // the rest belongs to dsh
+    destroy(...args) { return slow.destroy(...args) }
+  }
+  const route = new ToolRoute()
+  undici.setGlobalDispatcher(route)
+  return route
+}
+await lengthenToolCalls(await load('undici'), process.env.QQBOT_MCP_URL, Number(process.env.QQBOT_TOOL_TIMEOUT_MS))
+
 export const name = 'qq-handoff'
 export const inject = ['agents', 'sessions', 'systemPrompt']
 
