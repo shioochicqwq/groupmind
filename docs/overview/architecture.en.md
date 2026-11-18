@@ -1,199 +1,374 @@
-# groupmind Architecture: How a "Group Member with Memory" Is Built
+# Always Present, Never Held Up: The Architecture of groupmind
 
 [简体中文](architecture.md) | **English**
 
-> This document describes groupmind's overall architecture and its main design trade-offs, for readers who want to understand the project or reuse part of it.
-> The project is a **work in progress**: the research part has fairly complete experiment records and the bot host runs end to end in shadow testing, but deployment and compatibility were never finished (see "Status and limitations" at the end).
-> All numbers come from the experiment records in the repository; sources are in the [research summary](research-report.en.md) and the documents under `docs/` (in Chinese).
+> This is an architecture article organized around design motivation. Every mechanism is described in the same order: what problem it faces, which approaches were considered, why the current one was chosen, what it gains and what it costs, and how far it has been verified.
+> The project is a **work in progress**: the bot host runs end to end in shadow mode and the memory research has fairly complete experiment records, but the bot has never posted in a real group and deployment was never finished. Anything that is a "research prototype", "not wired in" or "not verified" is said so explicitly.
+> Sources for the numbers are in the [research report](research-report.en.md) and the original documents listed in the appendices (in Chinese).
 
-## 1. The problem
+## The core proposition
 
-groupmind aims to be a chat bot that lives in a QQ group as a "group member", not a question-answering assistant. The difference is mostly about memory:
+An agent that lives in a group chat for the long term has to meet three requirements that pull against each other:
 
-- A group member **remembers what happened**. What the group argued about a few weeks ago, who promised to treat everyone — they can recall it later, and when they don't remember, they don't make things up.
-- A group member **knows people**. Someone who changes their nickname or opens an alt account is still the same person; and they have different impressions of different people.
-- A group member **understands the group's language**. The group's own memes, nicknames and abbreviations can't be found in a general dictionary.
-- A group member **doesn't dredge up old history in every message**. Most chatter is forgotten at once; only a few things leave an impression.
+- **Always present**: group chats go on for months or years; it has to remember the past and know the people in the group.
+- **Always reachable**: anyone may @-mention it at any moment, and its response must not be blocked by something else.
+- **Never fabricating**: not remembering is acceptable; misstating events, taking what others say as fact, or letting group members rewrite its rules is not.
 
-Group-chat data is also unfriendly to memory systems: several people talk at once and topics interleave; messages are short (a dozen or so Chinese characters on average); there is a lot of slang; people change nicknames; and the gap between a quote-reply and the quoted message has a median of about half a minute, with 99% within 4.5 hours — quoting is almost never used to bring up old events. Public memory benchmarks (LoCoMo, LongMemEval, etc.) are mostly two-party dialogues or synthetic data and cover none of these traits.
+groupmind's answer fits in three sentences. Every section below unfolds them for one concrete problem:
 
-The priority was set at the start of the project: **being like a group member > answering completely**. The bot may not know or may remember vaguely, but it must not fabricate.
+1. **Raw messages are the only source of truth, and are only ever appended to.** Summaries, colors, people, memes and impressions are derived artifacts that can be rebuilt; they exist only to help find the raw text.
+2. **The session is short-term working memory; the message store is long-term memory.** Sessions can be compacted or discarded; the message store cannot.
+3. **Slow work leaves the group-chat session.** The group-chat session only does the talking.
 
-## 2. Overall structure
+## 1. How a group-chat agent differs from an ordinary chat agent
 
-The system has two parts: the online bot host **bothost**, and the offline memory research bench **bench**. They share one message store.
+An ordinary chat agent faces one person, one task, and a conversation that begins and ends. In a group chat almost every one of these is different:
 
-```text
-QQ client (alt account)
-  └─ SnowLuma (OneBot v11 implementation) ── reverse WebSocket ──┐
-                                                                ▼
-┌──────────────────────── bothost (Python) ────────────────────────┐
-│  /ws   OneBot server: receive and send messages                   │
-│  Message parsing → write to the message store (memory.db, append-only)
-│  One worker per group: debounce into a turn → hand to the group's agent session
-│  /mcp  Tool server: memory retrieval, knowing people, fact-checking, video, speaking
-│  Session handoff: slow tasks stay in the old session; a new session keeps chatting
-└──────────────────────────────────────────────────────────────────┘
-          │ JSON-RPC (one process per group)          ▲ MCP tool calls
-          ▼                                           │
-┌──────── dsh (general-purpose agent kernel) ────┐    │
-│  sdk-minimal profile                            │────┘
-│  Plugins: handoff.mjs (handoff)                 │
-│           persona compaction (the persona model writes its own summary)
-└─────────────────────────────────────────────────┘
-          │
-          ▼
-   Model gateway (OpenAI-compatible / Gemini-native passthrough)
+| | Ordinary chat agent | Group-chat agent |
+|---|---|---|
+| Input | Every message is addressed to it | Most messages have nothing to do with it; several speakers interleave and several topics run at once |
+| Time scale | One session, minutes to hours | Months to years, with no "end" |
+| Cost of a memory failure | If it forgets, the user can ask again | Fabricating past events or misattributing who said what hurts more than forgetting |
+| Trust in input | The user's words are instructions | Group members' words are **data** and cannot change system rules |
+| Latency | The user is waiting | Others are waiting; if it gets stuck, the people after them are waiting too |
+| Language | General language | The group's own memes, nicknames and abbreviations; people change names or use several accounts |
 
-┌──────────── bench (offline research bench) ────────────┐
-│  Import, coloring, indexing, retrieval, evaluation, judging, ledger
-│  Frozen retrieval pipeline → reused by bothost's recall tool
-└─────────────────────────────────────────────────────────┘
+These differences set some basic trade-offs. Outside shadow mode, the bot **only starts a turn when it is called** (@-mentioned, replied to, or named); other messages are still stored and are handed over together the next time it is called. Messages are debounced briefly and merged into one turn instead of triggering one model call each.
+
+> Shadow testing is the exception: the bot never really speaks, so nobody calls it; in shadow mode every message counts as a chance, and what it would say is only recorded and forwarded to the developer. There is currently **no proactive speaking**.
+
+## 2. Overall structure: a thin host plus a general-purpose kernel
+
+```mermaid
+flowchart LR
+    QQ[QQ group] -- OneBot v11 --> H
+    subgraph H[bothost host - Python]
+        direction TB
+        ST[(message store memory.db<br/>append-only)]
+        WK[one worker per group<br/>debounce, merge into turns]
+        TL[tool server - MCP, per-group auth<br/>memory_search · note_person · who_is<br/>look_up · watch_video · send_group_message]
+        HO[(handoff coordination handoff.db)]
+    end
+    subgraph K[dsh general-purpose agent kernel - one process per group]
+        direction TB
+        LOOP[dialogue loop · tool calls<br/>sessions on disk · compaction]
+        PL[plugins: handoff - open/fork/cancel/close sessions<br/>persona compaction · people table]
+    end
+    WK -- JSON-RPC --> K
+    K -- tool calls --> TL
+    TL --> ST
+    K --> GW[model gateway<br/>OpenAI-compatible]
 ```
 
-Delegating agent capabilities to a general-purpose kernel (dsh) instead of writing our own dialogue loop is the approach from D-045 onward. Early versions ran on AstrBot and were extended through plugins; later, memory, handoff and tool scheduling all needed finer control, so we switched to our own thin host plus a general-purpose kernel. AstrBot-era code and documents are still in the repository, marked "outdated" (已过时).
+Early versions ran on AstrBot, with memory and web access written as plugins. It turned out that the things we needed (forking sessions, cancelling them, having the model write its own memo during compaction, splitting sessions by group) all required direct control over the agent's sessions, which the plugin layer could not reach. So we switched to **writing our own thin host and handing the agent loop to the general-purpose kernel dsh** (D-045):
 
-## 3. The path of a message
+- **The host owns "group-chat semantics"**: sending and receiving, the message store, when to start a turn, tool implementations, handoff scheduling.
+- **The kernel owns "the agent itself"**: the dialogue loop, tool calls, saving sessions, context compaction. Extra capabilities the host needs are added as dsh plugins, without modifying the kernel.
 
-1. **Receive.** SnowLuma converts a QQ message into a OneBot event and pushes it to bothost's `/ws`.
-2. **Normalize.** `bothost/onebot.py` turns the event into one line of text: time, speaker, body. Images are numbered as 【图片N】 ("[Image N]"), cards and videos become links, and @-mentions are written as real names. The line is then written to the message store. Imported history and messages received after going live are in the same store (D-045).
-3. **Merge into a turn.** Each group has a worker that waits briefly (debounce), merges the new messages into one turn and hands it to that group's agent session. Not every message triggers a model call.
-4. **Understand media.** Images go to the main model directly as attachments; stickers are understood in a separate call, cached by image hash, and their description is passed to the session.
-5. **Decide whether to speak.** The model decides for itself whether to speak. To say something it calls the `send_group_message` tool; not calling it means staying silent. In shadow mode, messages are only recorded and forwarded to the developer, not sent to the group.
-6. **Recall, fact-check or watch videos when needed.** The model uses MCP tools to fetch memory and external information on demand (sections 4 and 6).
+The cost is being tied to a dsh version. Handoff uses several internal interfaces of dsh 0.2.1-rc.4 (the fork seed, cancellation, creating user messages); tests must be re-run after a kernel upgrade (section 7).
 
-## 4. Memory: raw text as the foundation, coloring as the index
+The ordinary OneBot message path is unremarkable; the full flow is in [Appendix A](#appendix-a-the-full-path-of-an-ordinary-message).
 
-This is the core of the project and where most experiments were done.
+## 3. Context lifetime: per-group sessions, caching and compaction
 
-### 4.1 Three layers of data
+### Problem
+
+Months of a group's chat fit in no context window. But rebuilding the context from scratch every turn has two problems: every turn pays for the full input again, and the model loses its sense of "where were we just now".
+
+### Choice: one long session per group, with an append-only prefix
+
+Each group has its own dsh process and session. The session's prefix is kept as stable as possible so that the model provider's prefix cache keeps hitting:
+
+- **The system prompt is fixed**: the persona, group-chat rules and meme snapshot are assembled when the process starts and stay unchanged for the life of the process.
+- **The people table is updated only when the prefix has to be rebuilt anyway**: after a process restart, a new session or a compaction, the prefix is already invalid, and only then is the people table in the system prompt rewritten; people learned in between are appended at the start of the next turn's input.
+- **Background results are never inserted into a request in progress**: results returned by handoff and the meanings of stickers are placed at the very start of the next turn's input, marked "(internal note, not a group message)".
+
+Approaches given up:
+
+- **Reassembling the context every turn (pure retrieval)**: the cache is invalidated every turn, and the model does not remember what it just said.
+- **Writing dynamic information into the system prompt**: every change invalidates the whole prefix.
+
+Whether sessions are cut daily or kept running depends on how long the provider's cache lasts (D-048). Providers whose cache lasts for days (such as DeepSeek) suit one long session; with short-lived caches, a new session is started each day and begins with a recap of the recent chat.
+
+### Compaction: let the persona-bearing model write its own memo
+
+When the context reaches the threshold (about 110,000 tokens by default), the kernel replaces the earlier conversation with a summary. dsh's built-in compaction prompt was written for coding assistants and produces an English "task checkpoint". groupmind replaces it with a plugin that changes only the summarization step (`deploy/dsh/compaction-persona.*`):
+
+- The request's prefix is exactly the same as in a normal turn; only the end is replaced with a Chinese instruction: "this chat is about to be taken away from you; write a memo to yourself in your own voice", covering what was being discussed, what it promised to whom, and how it feels about people.
+- The memo may end with a 【人物】 ("people") section, which the host uses to update the people table.
+
+**Gain**: the prefix is the same, so the summary request itself also hits the cache. In one check on a synthetic group chat, 93%–97% of the input of the three summary requests hit the cache, and after compaction the model correctly answered questions about things it had been asked to remember.
+
+**Cost**: the summary is not a reliable copy of the original. Both kinds of summary (persona and built-in) made the same mistake: describing "the message just replied to" as "not yet replied to", because the compacted range does not include the last few turns kept as they are. So the summary is only working memory; the original words still have to be looked up in the store with `memory_search`.
+
+**How far it is verified**: the numbers above come from synthetic group chats, each approach run once; they are a "does it work" check, not a score. A small session-lifetime experiment showed that under the same context limit, a long session is cheaper than a new session each day (about half the uncached input) and can pick up the previous two days without querying the store; what really drives cost is the compaction threshold, not whether sessions are cut daily. Long-term behavior in a real group has not been tested.
+
+## 4. Long-term memory: raw text as the foundation, derivations as the index
+
+### Problem
+
+The most direct approach to long-term memory is to have the model keep writing summaries and extracting facts, storing them as "knowledge about this group". The trouble is that this is **lossy and cumulative**: details a summary drops cannot be recovered, and a wrongly extracted fact becomes evidence for the next round of consolidation, sounding truer each time it is passed on. Group chat is especially easy to get wrong: several speakers interleave, there are many jokes and much irony, and who said what is often unclear.
+
+### Choice: each kind of data does one job
+
+| Data | Role | Can it be modified automatically? | Given to the answering model? |
+|---|---|---|---|
+| Raw messages | The only source of truth | No, append-only | **Yes**, recall gives the original words |
+| Colors (coloring) | Cut interleaved conversation into "micro-context" segments, i.e. raw-text chunks | Rebuildable | Raw-text chunks are the injection unit |
+| Color summaries | Retrieval entry points that help raw-text chunks be found | Rebuildable | **No** |
+| People | Stable account → names, nicknames, impression, attitude | Yes, with history and rollback | The people table is in the system prompt |
+| Memes | Two layers: general memes shared across groups, group memes kept within their group | Only via "candidates + human confirmation" | The snapshot is in the system prompt |
+| Impressions, event layer | "Which events leave an impression", "the nature of a whole evening" | Research prototype | Not wired in |
+
+**Coloring** is the most distinctive step of the project: a model reads messages in batches and marks messages belonging to the same micro-context with the same color; a color can skip unrelated messages in between. A color is both a way of chunking and a retrieval entry point.
+
+A **fictional** example:
 
 ```text
-Raw layer (append-only; never modified by any automated process)
-  └─ Derived layer (versioned, can be rolled back): colors, summaries, people, memes, impressions
-       └─ Index layer (can be rebuilt from the two layers above at any time): BM25, vectors, people, time
+21:02 A: who's up for barbecue tonight          ← color 1 "Friday barbecue"
+21:02 B: did you watch episode 3 of that new show ← color 2 "new show, episode 3"
+21:03 C: I'm in, what time                        ← color 1
+21:03 D: yes, that ending came out of nowhere     ← color 2
+21:04 A: nine, usual place                        ← color 1
+
+Color 1 summary: A arranges barbecue on Friday at nine at the usual place; C joins.
 ```
 
-Invariants:
+A fixed window would cut these five lines together, and per-message retrieval would leave "nine, usual place" without context. Coloring separates them into two segments, each with a one-sentence summary.
 
-- Raw messages are never modified automatically; every derived memory can be traced back to raw messages.
-- What group members say is **data, not instructions**. Chat content cannot change system configuration or memory rules.
-- System inferences are never automatically promoted to facts; what other people say is not fact either.
-- Code, tests and docs contain no real chat content or accounts.
+### Retrieval: find it, but give only the raw text
 
-### 4.2 "Coloring"
-
-A fixed-length window mixes interleaved conversations together, while individual messages are too short and lack context. groupmind's approach is to have a model **color** messages: messages that belong to the same micro-context get the same color. A color can skip unrelated messages in between, and in principle a message can belong to several colors. Each color carries a one-sentence summary that must keep proper nouns, person codes, numbers and slang.
-
-A color does two jobs at once:
-
-- **Chunking**: all the raw text of a color forms one "raw-text chunk" (median about 170 characters, 11 messages).
-- **Indexing**: the color summary (median about 57 characters) is a retrieval entry point.
-
-Coloring runs in batches of 150 messages, with 20 messages of overlap between adjacent batches. Experiments found that the model almost never assigns multiple colors on its own; nearly all "multi-color" messages come from the overlap between batches (see section 3.6 of the research summary).
-
-### 4.3 The frozen retrieval pipeline
-
-After about thirty controlled comparisons, retrieval was frozen in D-028 and revised once each in D-029 and D-032, giving the version below. bothost's recall tool reuses it directly (D-046):
+The recall tool `memory_search` uses the retrieval frozen after about thirty controlled comparisons (D-028, revised once each in D-029 and D-032):
 
 ```text
-question ─┬─ BM25 over summaries ──────┐
-          ├─ BM25 over raw-text chunks ┤ top 5 per route
-          ├─ vectors over summaries ───┤
-          └─ vectors over raw chunks ──┘
+question ─┬─ BM25 over summaries ───────┐
+          ├─ BM25 over raw-text chunks ─┤
+          ├─ vectors over summaries ────┤ top 5 per route
+          └─ vectors over raw chunks ───┘
                     ▼
-            global RRF (k = 60)
+       global reciprocal rank fusion (RRF)
                     ▼
-   pack raw-text chunks in rank order up to 1,500 characters; duplicate messages appear once
-                    ▼
-        to the answering model (raw text, not summaries)
+  pack raw-text chunks in rank order up to 1,500 characters; duplicate messages appear once → to the model
 ```
 
-Key findings (data in the research summary):
+Recent messages that have not been colored yet are searched one by one with keywords, returning the matching line with its surrounding context. When the vector service is unreachable, only keywords are used; when the index is broken, everything is searched message by message. The tool's description says: "quotes must match the original; if nothing is found, say you don't recall — don't make things up".
 
-- **Give raw text, not summaries.** With the same 1,500-character budget, giving only summaries scores 10–21 percentage points lower than giving raw-text chunks.
-- **Combine keywords and vectors.** With a proper vector configuration (separate query and document embeddings, a retrieval instruction on the query), a single vector route matches or beats BM25 in recall; fusing all four routes beat the two keyword-only routes by about 7 percentage points on one group.
-- **Candidate depth is the key variable in fusion.** With too many candidates per route, chunks that rank mediocre in several routes push out evidence that ranks first in only one route. 3–10 per route is a plateau; we use 5.
-- **Once the evidence is in, the model uses it well over 90% of the time.** The remaining loss is mainly evidence that never got in.
+Key choices and the approaches given up (experiments in the research report):
 
-When first frozen, end-to-end accuracy on the two development groups was 82.7% and 70.6%, 12.5 and 17.2 percentage points above a 10-message-window baseline with the same budget (significant in paired comparison). The vectors were then switched to the correct configuration (D-029), raising accuracy to 85.5% and 71.3% (only the DEV-1 gain is significant); then overlapping batches were de-duplicated (D-032), giving the current 84.1% and 71.1%, not significantly different from the previous version.
+- **Giving only summaries**: 10–21 percentage points below giving raw-text chunks. So summaries only serve as retrieval entry points.
+- **A single route**: BM25 and vectors each miss questions the other finds; fusing all four routes is best.
+- **Taking many candidates per route**: with 20–30 per route, chunks that rank mediocre in several routes accumulate score and push out evidence that ranks first in only one route. 3–10 per route is a plateau.
+- **Merging similar colors from adjacent batches into long chunks**: the evidence-inclusion rate drops significantly, because one long chunk can fill the whole budget.
 
-### 4.4 Event layer and impressions (research prototype, side path)
+**Cost**: coloring is offline batch processing, paying one model call per 150 messages. Coloring after going live was designed to be triggered "when the main session cold-starts or compacts" (D-047), but **only the counting is wired in**: the host records how many messages have not been colored yet, but coloring itself is not wired into bothost. So in the live system, recent messages rely on per-message keyword search.
 
-Chunk-level retrieval is good at "where is the raw text of that event", but cannot answer questions that need properties of a whole stretch of time, such as "the most chaotic night" or "when a meme first caught on with the whole group". For these we built an **event layer** on top of the chunks: episodes (a continuous stretch of chat), threads (parallel sub-topics) and links (a topic resurfacing on another day). It stores only references, never copies of the raw text. It is a side-path prototype and does not take part in the frozen pipeline's recall.
+**How far it is verified**: the frozen version's end-to-end accuracy on the two development groups is 84.1% and 71.1%, but it **has not been validated on an independent test set**. The advantage of coloring itself (as a way of chunking) over fixed windows is not solid: 4.1 and 2.5 percentage points higher on the two groups, the latter not significant; most of the gain comes from multi-route fusion and shallow candidate lists. In addition, the model almost never puts one message into more than one color, which differs from the design (research report RQ2).
 
-On top of that we tried **impression formation** (D-043, D-044): the model reads the chat in chronological order, knowing only what came before, and says which things would leave an impression and how deep; at recall time it gives the gist, the original words, or nothing, depending on the depth. Time itself is not an input, and there is no "fade with time elapsed". So far this part has only been shown to run; it has not been compared against human impressions.
+### Knowing people
 
-### 4.5 Memes and people
+People are tracked by **stable account**, not by nickname: in one development group, 27 of 104 people had changed their name, and merging by name would split them into 40 extra identities; human annotation also found people using two or three accounts at the same time.
 
-- **The meme table has two layers** (D-033): general internet slang is shared across groups; group-specific memes stay within their group. Updates go through "candidate list + human confirmation + rebuilt snapshot", never automatic rewrites (D-039).
-- **People are tracked by stable account, not nickname.** In one development group, 27 of 104 people had changed their name; merging by name would split them into 40 extra identities. Human annotation also found quite a few people with multiple accounts, which the person table needs to support.
-- **The bot gets to know people by itself** (D-055): the model can record what it knows about someone with `note_person`, and adds to it while writing compaction summaries; the full person table is placed in the system prompt.
+The bot gets to know people in two ways (D-055):
 
-## 5. Sessions: long conversations, compaction and handoff
+- It calls `note_person` to record nicknames, impressions and attitudes, or to say that two names are the same person. Impressions and attitudes are replaced by newer ones, nicknames accumulate, and every change has history and can be undone.
+- When writing a compaction memo, it adds to them in the final 【人物】 section.
 
-### 5.1 One long session per group
+The people table is shared across groups and placed in full in the system prompt, updated only when the prefix has to be rebuilt anyway (section 3).
 
-Each group has one agent session. Whether sessions are cut daily or kept running depends on the model provider's caching: with providers that cache for a long time (such as DeepSeek), a long session is cheaper and can pick up the past few days without querying the store; with short-lived caches, a new session is started each day (D-048). Experiments found that what really drives cost is how large the context is allowed to grow (the compaction threshold), not whether sessions are cut daily.
+**How far it is verified**: during shadow testing the bot recorded only 5 entries by itself; quality cannot be assessed yet.
 
-### 5.2 Persona-aware compaction
+### Memes
 
-When the context is nearly full, the kernel compacts the earlier conversation into a summary. The built-in compaction prompt was written for coding assistants and produces an English "task checkpoint". groupmind replaces it with a plugin that changes only the summarization step: the message prefix is exactly the same as in a normal turn (so it hits the cache), and the end is replaced with a Chinese instruction asking **the persona-bearing model to write a private memo to itself in its own voice**. In tests, 93%–97% of the summary request's input hit the cache, and after compaction the model correctly answered questions about things it had been asked to remember earlier.
+The research findings on memes are blunt: the model understands roughly half of general internet slang, barely understands the group's own memes, and a chat snippet using the word does not help. So group memes must come from a meme table. The table's candidates are mined from history by an offline script, confirmed by a human, written into a snapshot and placed in the system prompt; automatic rewrites are not allowed (D-039). Candidate mining is currently where most memes are lost (research report RQ6).
 
-Known flaw: the summary is not a reliable copy of the original — it can describe "the message just replied to" as "not yet replied to". The raw text still has to come from `memory_search`.
+### Impressions and the event layer (research prototypes)
 
-### 5.3 Session handoff
+These two parts live in `bench/` and are **not wired into the bot**:
 
-Watching a video, reading a page that needs a browser, or a long fact-check can each take minutes. If the group-chat session waited, the whole group would be blocked. **Session handoff** (D-052) works like this:
+- **Event layer** (side path): on top of raw-text chunks, it records "a continuous stretch of chat", "parallel sub-topics" and "a topic resurfacing on another day", storing only references, to answer questions such as "the most chaotic night" that chunk-level retrieval cannot.
+- **Impression formation**: the model reads the chat in chronological order, knowing only what came before, and says which things would leave an impression and how deep; at recall time it gives the gist, the original words, or nothing, depending on the depth. The mechanism runs; it has not been compared against human impressions.
 
-1. When a slow task starts, the old session stays in the background to finish it;
-2. The host forks a new session from the old one, which carries on with new group messages;
-3. When the old session finishes, it returns the result in a 【回复】【摘要】 ("reply / summary") format; the host decides whether to post it as a quote-reply to the original message, then passes the summary to the new session as a note;
-4. Retired sessions are closed by the handoff plugin to free memory.
+## 5. Slow work: session handoff
 
-The kernel itself has no time limits; the host only does "stall detection": if a session produces no events for a long time and is not executing a tool call, only that session is cancelled, without affecting the process or other sessions.
+### Problem
 
-## 6. Tools
+Watching a video or reading a page that needs a browser often takes minutes. Each group has only one worker and turns are serial. If the group-chat session stopped to wait, nobody who @-mentioned it during those minutes would get a response.
 
-The agent gets these tools through MCP (`bothost/tools.py`):
+The earliest approach was to put time limits everywhere: 300 seconds per turn, 180 seconds per tool call, and after 160 seconds of video, reply "not done yet" so the model would ask again next turn. This wasted calls, depended on the model remembering to come back, and still blocked the group.
 
-| Tool | Purpose |
+### Approaches considered
+
+| Approach | Problem |
 |---|---|
-| `send_group_message` | Speak. Not calling it means staying silent |
-| `memory_context` / `memory_search` | Recall: snapshots of people and memes; retrieve historical raw text by question (the frozen pipeline) |
-| `note_person` / `who_is` | Knowing people: record what is known about someone; look up who an account is |
-| `look_up` | Fact-check: open a separate conversation **without the persona** to search and read web pages, returning only the conclusion and the process; follow-up questions are possible (D-050) |
-| `watch_video` | Watch a video: download, compress, split by the inline size limit and hand to a video model (D-041, D-051) |
+| The group-chat session waits | The whole group is blocked |
+| The tool replies "not ready yet" and is polled later | Depends on the model remembering to come back; every poll is a full model call |
+| When the background work finishes, insert the result into the running session | Inserting a message while the session is generating disrupts the conversation and breaks the cache prefix |
+| **Fork the session (adopted)** | The old session finishes the task in the background; a forked new session carries on in the group |
 
-Web reading is tiered: first our own reader (requests + parsing, with SSRF protection), then, if that fails, a browser tier with a real, windowed Chrome; the search provider's page-reading API is the lowest tier (D-040, D-042, D-050). The fact-checking helper has no persona so that role-play does not affect factual judgment.
+### How it works
 
-## 7. The research bench
+```mermaid
+sequenceDiagram
+    participant G as Group
+    participant H as Host
+    participant A as Session A (old)
+    participant B as Session B (new)
+    G->>H: X: can you see what this video is about
+    H->>A: a turn
+    A->>H: call watch_video
+    Note over H: the host decides this is slow (a video, or page reading about to escalate to a browser)
+    H->>B: fork B from A (up to just before this call)
+    Note over H: active-session pointer A → B (conditional update with a generation number)
+    H-->>A: the tool keeps running in A, with no overall time limit
+    G->>H: Y: anyone up for a game tonight
+    H->>B: new turn (B carries on in the group)
+    B->>G: I can join later
+    A->>H: video done, wraps up in the 【回复】【摘要】 (reply / summary) format
+    H->>G: post the 【回复】 as a quote-reply to X's message
+    H->>H: record the 【摘要】 as an event, close A
+    G->>H: Z: ...
+    H->>B: new turn, starting with "(internal note) A watched the video: ..."
+```
 
-`bench/` is a full toolkit for offline evaluation: import and cleaning, coloring, indexing, the various retrieval schemes, question generation, model judging, statistics and the ledger. A few practices worth mentioning:
+Some details:
 
-- **Temporal visibility is enforced by the framework**: retrieval can only see colors that ended before `as_of`, so answers cannot leak.
-- **Every experiment is recorded in a ledger** (`ledger.jsonl`), with tokens recorded separately by role: filtering, coloring, answering, judging, main session, fact-checking, video, stickers.
-- **Three-state scoring**: correct, wrong, empty answer (mostly safety refusals). The primary metric is end-to-end accuracy, where an empty answer counts as a failure; effective-answer accuracy is reported for reference.
-- **Paired bootstrap confidence intervals**: schemes are compared question by question; a difference is called significant only if the 95% CI excludes 0.
-- **Frozen groups**: some groups were sealed from the start — never colored or viewed — and kept for the final test.
+- **Only the host decides when to hand off**: currently in exactly two cases — watching a video, and page reading about to escalate from an ordinary request to a browser. There is no timer and no extra model call to decide.
+- **The fork point is just before the call was made**: the new session has the same prefix as the old one (so the cache still hits), and there is no broken record of "a call without a result".
+- **The old session's wrap-up format**: when a tool result returns to a session that no longer handles the group, a note is appended asking it not to post to the group any more, and to write only a 【回复】 (one or two sentences, posted as a quote-reply to the original message) and a 【摘要】 (a JSON object: what it observed, what it inferred, the conclusion, sources, what it could not do, facts worth remembering, people it got to know). Only what it really saw.
+- **How results return to the group chat**: the host posts the 【回复】 as a quote-reply to the original message; the 【摘要】 is recorded as an event and handed to the new session as an internal note at the start of its next turn. Events are numbered, and are marked delivered only after the model has actually read them.
+- **Retired sessions are closed**: dsh's SDK protocol itself offers no fork, cancel or close, and a session once opened stays in memory. So the host's plugin opens, holds and closes sessions.
+
+### How failures are handled
+
+| Situation | Handling |
+|---|---|
+| A group already has 2 background tasks, or 4 are running overall | Handoff is refused; the call runs as usual in the original session |
+| Forking the session fails | Nothing changes; the call runs as usual in the original session |
+| The same call asks for a handoff again | The same task is returned; no second fork |
+| A background session produces no events for a long time and is not executing a tool | Judged stalled (600 seconds by default); only that session is cancelled; the process and other sessions are unaffected |
+| It has still not stopped 60 seconds after cancellation | The turn is recorded as an error; the process is not killed |
+| A background task errors or is cancelled | A failure event is recorded; the new session's next turn sees "it got stuck and was cancelled" or "it hit an error" |
+| The host restarts | On startup, tasks still running are marked failed ("the bot restarted; the background task was interrupted") |
+
+**Gain**: slow work no longer blocks the group chat, and the host no longer needs an overall time limit per turn. In a memory test with 30 consecutive handoffs, closing retired sessions left 1 live session (31 without closing), with resident memory of 262 MB vs 290 MB. The gap is small because forked sessions share history objects with the original.
+
+**Costs and known defects**:
+
+- **Tool calls longer than 5 minutes always fail**: dsh calls tools over HTTP, and Node's built-in header timeout is 300 seconds; the "tool calls may take up to 1 hour" setting does not reach that layer. Videos that take more than 5 minutes to process fail this way.
+- **A long fact-check that is not handed off blocks the group**: handoff happens only when page reading escalates to a browser; a fact-check that only searches without reading pages keeps occupying the group-chat session (one turn took 563 seconds in practice).
+- It depends on internal interfaces of dsh 0.2.1-rc.4, and the old session's wrap-up depends on the model following the format.
+
+**How far it is verified**: end-to-end tests with a fake model and a fake OneBot (13 handoff tests) cover handoff, stall cancellation, and memory after consecutive handoffs; real fact-checks and video watching have run in shadow testing. The bot has never posted in a real group, and how quote-replies look in QQ has not been seen.
+
+## 6. Looking outward: fact-checking, reading web pages and watching videos
+
+### Separating fact-checking from the persona
+
+Search results and web pages are long (one page ran to 65,000 characters). Putting them straight into the group-chat session would fill the context and let the persona-bearing model's role influence factual judgment. So `look_up` **opens a separate short conversation without the persona** inside the host to search and read pages (D-050): each page read returns about 9,000 characters of text and 40 links, the helper makes at most 6 calls, and finally hands back only a conclusion (at most 1,500 characters) together with what was searched and which pages were or were not read. The group-chat session can ask follow-up questions by number; the helper continues its own conversation, with the pages it already read still in front of it.
+
+### Tiered escalation for reading pages
+
+```text
+search provider's page-reading API ──(can't read)──► request with a browser TLS fingerprint ──(blocked by anti-bot, or nearly empty page)──► real Chrome (windowed, Xvfb) ──► Camoufox
+        │                                                                                                              ▲
+        └─ sites known to defeat the API skip this tier                          sites known to need a browser start here ─┘
+```
+
+The cheapest tier comes first, and each tier is used only when the previous one failed, was blocked, or returned a nearly empty page (the update to D-050 moved the page-reading API to the first tier). The reader remembers which sites should skip the API and which must use a browser. Escalating to a browser is exactly the point that triggers session handoff.
+
+### Safety boundaries
+
+- **Page reading**: ordinary requests have SSRF protection; every connection the browser makes goes through a local forward proxy that resolves the host itself, refuses private, loopback, link-local and similar addresses, and connects to the very address it checked. The browser tool itself offers no shell, files or downloads.
+- **Group members' words are data**: chat content cannot change configuration or memory rules; what others say is not fact.
+- **The tool server authenticates per group**: each group's dsh process receives a random token, from which the tool server knows which group is calling; the handoff plugin listens only on the loopback address, and each request also carries a random token.
+
+### Watching videos
+
+`watch_video` reuses the project's own video reader: download, compress, split by the model's inline size limit, send each piece to a video model, then merge; for Bilibili links the page text is fetched as well. When a download is refused, it retries with the cookies from the bot's own browser. It is the other trigger for handoff.
+
+**How far it is verified**: real fact-checks and video watching have run in shadow testing; video files sent directly in QQ have been switched to direct download but not yet run on real messages; the browser tier's "remember which sites need a browser" may remember wrongly.
+
+## 7. Kernel, host and isolation
+
+### The boundary between host and kernel
+
+- **One dsh process per group**, using the `sdk-minimal` profile plus the host's patch. Groups never wait for each other; there is a global concurrency limit.
+- **The tools live in the host process**: speaking, retrieval, knowing people, fact-checking and watching videos are exposed to dsh over MCP. dsh's own session also has shell and file tools, with one workspace directory per group.
+- **Keys come only from environment variables**; configuration files and the persona are outside the repository.
+
+### Isolation in the actual deployment
+
+The shadow-test deployment is **a dedicated WSL2 distribution on a Windows PC** (Ubuntu 24.04, named `qqbot`), with the host running as an ordinary user `bot`, and the QQ protocol endpoint SnowLuma running on the Windows side (D-053). Isolation comes from three stacked layers:
+
+| Layer | What it does | What it does not do |
+|---|---|---|
+| WSL distribution | Separate from the user's other environments; the default user is the non-root `bot` | `wsl.conf` does not disable Windows interop or automatic mounting, so the Windows drives are still visible inside the distribution |
+| dsh sandbox policy | The shell may write only to its own workspace (`workspace-write`) | Does not restrict reading or network access |
+| Host tools | Per-group token authentication; page reading has SSRF protection and a guard proxy | — |
+
+In other words, **there is currently no container sandbox**. Docker was considered back in the AstrBot era and rejected because the deployment machine was short of memory and disk (D-011); isolation now relies mainly on "a dedicated WSL distribution + an ordinary user + write-only-to-workspace". The comment in the patch says so too: dsh's policy only limits writes, and real isolation has to come from where the whole process runs. Disabling WSL interop and automatic mounting, or switching to a container, has not been done.
 
 ## 8. Status and limitations
 
-This project was published halfway through. None of the following is **finished**:
+- **Implemented and running in shadow testing**: per-group sessions with persona compaction, memory retrieval, knowing people, fact-checking, watching videos, understanding stickers, session handoff.
+- **Research prototypes, not wired in**: coloring after going live (only counting is wired in), the event layer, impression formation, the recall-policy layer.
+- **Not verified**: actually posting, proactive speaking (does not exist), the frozen version on an independent test set, human blind evaluation of "human-likeness", tool calls longer than 5 minutes.
+- **Deployment is very unfriendly**: it has only run in the author's own Windows + WSL environment, relying on scheduled tasks and a script for pushing updates by hand; paths, accounts and the model gateway all carry traces of the author's environment.
 
-- **Deployment is very unfriendly.** The current deployment is a WSL distribution on a Windows PC, plus scheduled tasks and a script for pushing updates by hand (`deploy/wsl/`). Paths, accounts and the model gateway all carry traces of the author's own environment; the other deployment directories (`deploy/windows`, `deploy/linux`) are from the AstrBot era and no longer apply. There is no container image and no one-step install.
-- **Poor compatibility.** It depends on internal interfaces of dsh 0.2.1-rc.4 (session forking, cancellation, etc.), which must be re-verified after a dsh upgrade; the protocol endpoint has only been tried with SnowLuma.
-- **It has never actually spoken.** It has always run in shadow mode and has never posted in a real group.
-- **Known defects**: tool calls longer than 5 minutes are cut off by an HTTP-layer timeout; a long fact-check that is not handed off to the background blocks the whole group. See section 7 of `docs/handover-2026-11-16.md`.
-- **The memory-research findings come from two development groups**; the frozen version has not been validated on an independent test set, and the "human-likeness" part has not had human blind evaluation.
-- **The data is not in the repository**: real chat logs, personas and human annotations live outside it. The code and docs in the repository contain no real chat content or accounts.
+## 9. Principles worth taking away
 
-## 9. Where to read next
+1. **Append-only raw text, plus everything rebuildable.** Anything derived can be wrong; as long as the raw text is there, it can be recomputed and traced.
+2. **Summaries are for finding; raw text is for answering.** This is the most stable experimental finding of the project.
+3. **Keep the prefix fixed; append the changes.** The people table, background results and sticker meanings all follow this rule, buying caching and continuity.
+4. **Slow work leaves the session that talks.** Handoff stops "being present" and "getting things done" from blocking each other.
+5. **State which layer of isolation you actually have.** "Writes only to the workspace" is not a sandbox.
+
+---
+
+## Appendix A: The full path of an ordinary message
+
+```mermaid
+flowchart TD
+    Q["QQ client"] --> S["SnowLuma<br/>OneBot v11"]
+    S -- "reverse WebSocket, token auth" --> W["bothost /ws"]
+    W --> P["parse: time, speaker, text<br/>number images, cards and videos to links, @ as names"]
+    P --> DB[("memory.db<br/>append-only")]
+    P --> C{"called?<br/>@ / reply to it / its name mentioned<br/>every message counts in shadow mode"}
+    C -- "no" --> WAIT["stays in the pending queue"]
+    C -- "yes" --> D["debounce, merge into one turn"]
+    WAIT --> D
+    D --> N["prepend: internal notes, newly known people,<br/>a recap of recent chat for a new session"]
+    N --> M["images as attachments; stickers understood in a separate call"]
+    M --> DSH["the group's dsh session"]
+    DSH -- "tool calls" --> T["host tool server"]
+    T -- "send_group_message" --> OUT{"shadow mode?"}
+    OUT -- "yes" --> SH["record in shadow.jsonl, forward to developer"]
+    OUT -- "no" --> GRP["post to the group"]
+```
+
+## Appendix B: Decision index
+
+| Topic | Decision record (`DECISIONS.md`, in Chinese) |
+|---|---|
+| Switch to a thin host + general-purpose kernel; history and new messages in one store | D-045 |
+| The frozen retrieval and its revisions; the recall tool uses the frozen version | D-028, D-029, D-032, D-046 |
+| When to color after going live (not wired in) | D-047 |
+| Compaction summaries written by the persona-bearing model; session lifetime | D-048 |
+| A persona-free fact-checking helper; tiered page reading (the D-050 update is authoritative) | D-040, D-042, D-050 |
+| Watching videos | D-041, D-051 |
+| Session handoff | D-052 |
+| WSL deployment and shadow mode | D-053 |
+| The bot gets to know people by itself | D-055 |
+| Two-layer meme table and how it is updated | D-033, D-039 |
+| Docker rejected early on | D-005, D-011 |
+
+## Appendix C: Where to read the original material
 
 | To learn about | Read |
 |---|---|
-| Findings and numbers | [Research summary](research-report.en.md) |
-| The current system, code map, known issues | `docs/handover-2026-11-16.md` (Chinese) |
-| The reasoning behind each decision | `DECISIONS.md`, D-001 to D-056 (Chinese) |
-| Chronological development log | `PROJECT.md` (Chinese) |
-| Original memory-research documents | `docs/research/`, `docs/memory-*.md` (Chinese) |
+| Experiment design, results and limitations | [Research report](research-report.en.md) |
+| The current system, code map, known issues | [docs/handover-2026-11-16.md](../handover-2026-11-16.md) (Chinese) |
+| Audit and implementation reports on session handoff | [docs/research/2026-11-session-handoff-report-v2.md](../research/2026-11-session-handoff-report-v2.md) (Chinese) |
+| Persona compaction and session lifetime | [docs/research/2026-11-persona-compaction-and-session-lifetime.md](../research/2026-11-persona-compaction-and-session-lifetime.md) (Chinese) |
+| The reasoning behind each decision | [DECISIONS.md](../../DECISIONS.md) (Chinese) |
+| Deployment | [deploy/wsl/README.md](../../deploy/wsl/README.md) (Chinese) |

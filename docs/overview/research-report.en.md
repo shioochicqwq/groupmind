@@ -1,53 +1,48 @@
-# Long-Term Memory for Chinese QQ Group Chats: Research Summary
+# Open Questions in Group-Chat Memory: groupmind Research Report (Overview)
 
 [简体中文](research-report.md) | **English**
 
-> This document summarizes groupmind's memory research from October–November 2026, for readers who want the findings without reading every experiment record.
-> Detailed methods, per-question data and every correction are in the original documents (in Chinese): the phase-one reports [v1](../research/2026-11-memory-stage-report.md), [v2](../research/2026-11-memory-stage-report-v2.md) and [v3](../research/2026-11-memory-stage-report-v3.md), the experiment results [memory-benchmark-results.md](../memory-benchmark-results.md), the experiment ledger [memory-benchmark-ledger.md](../memory-benchmark-ledger.md), and the dated research notes under `docs/research/`.
-> This document contains no real chat content. Groups are always referred to by codes; all numbers are aggregate statistics.
+> This document organizes groupmind's memory experiments from October–November 2026 by research question: why each experiment was run, what it controlled, what it compared, what it found, and how far the conclusions can be trusted.
+> The original records are unchanged, and every conclusion can be traced through [Appendix A](#appendix-a-tracing-the-conclusions) (sources in Chinese): the phase-one reports [v1](../research/2026-11-memory-stage-report.md), [v2](../research/2026-11-memory-stage-report-v2.md) and [v3](../research/2026-11-memory-stage-report-v3.md), the experiment results [memory-benchmark-results.md](../memory-benchmark-results.md), the experiment ledger [memory-benchmark-ledger.md](../memory-benchmark-ledger.md), and the dated research notes under `docs/research/`.
+> This document contains no real chat content. Groups are always referred to by codes; all numbers are aggregate statistics; example conversations are fictional and labeled as such.
 
 ## Abstract
 
-We designed and evaluated a long-term memory system for a bot that takes part in Chinese QQ group chats as a "group member". The system keeps every raw message. A model "colors" messages into micro-context segments, each with a one-sentence summary; retrieval indexes both the summaries and the raw-text chunks, and what is finally given to the answering model is raw text.
+We wanted to know how an agent living in a Chinese QQ group as a "group member" can accurately recall what happened in the group months later. The system keeps every raw message. A model "colors" messages into micro-context segments, each with a one-sentence summary; retrieval indexes both the summaries and the raw-text chunks, and what is given to the answering model is raw text.
 
-On two real development groups (about 16,000 and 46,000 messages), we ran about thirty controlled comparisons using 876 cross-week question-answering items. Main findings:
+Main findings on two real development groups:
 
-1. **The model must be given the original text.** Giving only summaries scores 10–21 percentage points lower.
-2. **Combine keywords and vectors, and keep candidate lists shallow.** Four-route retrieval (summary/raw × BM25/vector) fused with RRF, taking only the top 5 per route, was the best configuration. The initial frozen version beat a 10-message-window baseline with the same budget by 12.5 and 17.2 percentage points (significant in paired comparison).
-3. **The bottleneck is finding the evidence, not using it.** Once the evidence is in the context, the model's accuracy is about 93–95%; the remaining errors are mainly evidence that was not retrieved.
-4. **Group chat has its own patterns.** The gap between a quote-reply and the quoted message has a median of about half a minute, with 99% within 4.5 hours, so quote-replies cannot serve as samples of long-term memory. Group-specific memes are fewer than expected, but the model barely understands them and a meme table is required. Many people change nicknames or use several accounts, so people can only be tracked by stable account.
-5. **"Human-like" is a different yardstick.** People recall conversations by "remembering little, but what they remember is mostly right." We tried impression formation and a recall-policy layer; the mechanisms run, but have not been validated with human blind evaluation.
+| Finding | Strength of evidence |
+|---|---|
+| The model must be given raw text: giving only summaries scores 10.8–20.9 percentage points below raw-text chunks | Significant on both groups |
+| Four-route retrieval (summary/raw × BM25/vector) fused with only the top 5 per route is the best configuration; the initial version beat a fixed window with the same budget by 12.5 and 17.2 percentage points | Significant on both groups; "top 5" was picked on the same questions, and its differences from top 3 and top 10 are not significant |
+| The bottleneck is finding the evidence, not using it: once the evidence is in the context, the model answers about 93–95% correctly | Consistent on both groups |
+| The advantage of coloring as a way of chunking, over fixed windows, is **not solid**; the model almost never puts one message into several colors; merging colors into long chunks makes things significantly worse | First item: 4.1 points higher on one group (the original record gives no interval), not significant on the other; the last two are consistent on both groups |
+| The model barely understands group-specific memes, and context does not help; a meme table helps, but candidate mining loses the most | Consistent direction, small samples |
+| "Human-likeness" needs a different yardstick; the impression-formation and recall-policy mechanisms run | Not validated by humans |
 
-All findings come from the development sets; the frozen version has not been validated on an independent test set.
+All findings come from the development sets. The frozen version has not been validated on an independent test set.
 
 ---
 
-## 1. Problem
+## 1. Research questions
 
-### 1.1 Goal
-
-The bot's goal is to be a **group member with memory**: remember what happened, know the people in the group, understand the group's memes, recall old events naturally at the right moment, and not be led astray by irrelevant memories. The priority is "being like a group member > answering completely": it may not know or may remember vaguely, but it must not fabricate.
-
-Phase one studied only the most basic piece of this, **recalling and injecting historical evidence**:
-
-> Given a question *q* about past group chat and a time point *t*, the system may use only messages before *t*, and must select a set of raw messages within a fixed injection budget to give to the answering model. We evaluate whether the answer is correct; when the answer only appears after *t*, we evaluate whether the system abstains.
-
-### 1.2 What is special about group-chat data
-
-| Trait | Observed | Effect on retrieval |
+| ID | Question | Section |
 |---|---|---|
-| Many speakers, interleaved | Several topics often run in parallel at the same time | A fixed window mixes unrelated talk together, while a single message lacks context |
-| Short messages | A context segment has a median of about 170 characters and 11 messages, a dozen or so characters each | Sparse lexical signal; per-message retrieval does worst |
-| Quotes are close in time | 10,792 quote-replies across the two development groups: median gap about half a minute, 99% within 4.5 hours, only 6 quoting a message more than a day old | "Quote reconstruction" cannot be the main metric for long-term memory |
-| Nickname changes | 27 of 104 people changed their name | Merging by name creates 40 extra identities |
-| Slang | Among human-judged candidates, most were general internet slang; group-specific ones were a minority | A general dictionary is not enough; group memes must be learned separately |
-| Safety refusals | About 2% of the tested model's calls returned empty | Empty answers must be recorded separately |
+| RQ1 | When recalling, should the model be given raw text or summaries? | 3 |
+| RQ2 | Is coloring (chunking by micro-context) better than fixed windows? Does the model really assign multiple colors? | 4 |
+| RQ3 | What do keyword retrieval and vector retrieval each contribute? | 5 |
+| RQ4 | How should routes be fused, how deep should each go, and how should results be packed into the budget? | 6 |
+| RQ5 | Where do the remaining errors come from? | 7 |
+| RQ6 | Does the model understand the group's memes? Does a meme table help? | 8 |
+| RQ7 | How should people be identified? | 9 |
+| RQ8 | How can memory be made "human-like", and how can that be measured? | 10 |
 
-Public memory benchmarks are mostly two-party dialogues (LoCoMo [1], LongMemEval [2]) or synthetic English group chats (GroupMemBench [3], SocialMemBench [4]); none of them include the short messages, slang, nickname changes and interleaving of Chinese group chats. As a reference point we reproduced GroupMemBench's Technology subset: per-message BM25 scored 44.6% overall (95% CI 38.5–51.2) against 46.0% reported in the paper, suggesting the evaluation framework is broadly sound.
+A few engineering experiments (compaction, session lifetime, handoff memory) are in section 11; they are usability checks, not scores.
 
 ---
 
-## 2. Method
+## 2. Experimental setup
 
 ### 2.1 Data
 
@@ -58,195 +53,389 @@ The data comes from the user's own QQ chat export. Groups were selected by aggre
 | Messages after cleaning | 15,841 | 46,200 |
 | Speakers | 104 | 81 |
 | Time span | about 116 days | about 78 days |
+| Sensitive messages withheld | 77 | 202 |
 | Colors (context segments) | 828 | 2,451 |
 
-There are also validation groups and **frozen groups**: the frozen groups were sealed from the start — never colored or viewed — and kept for the final test. All numbers in this document come from the two development groups.
+There are also validation groups and **frozen groups**. The frozen groups were sealed from the start — never colored or viewed — and kept for the final test; every number in this document comes from the two development groups.
 
-### 2.2 Coloring
+### 2.2 Questions
 
-A model reads messages in batches (150 messages per batch, with 20 messages of overlap between adjacent batches) and marks messages that belong to the same micro-context with the same color. A color can skip unrelated messages in between, and a message can belong to several colors. For each color the model outputs a type, a name, a one- or two-sentence summary (which must keep proper nouns, person codes, numbers and slang) and the message IDs.
+The main experiments use **cross-week QA items** (`bench/tasks/silver.py`):
 
-The idea behind coloring is that a color is both a **way of chunking** the raw text and a **retrieval entry point**: the raw text is kept so it can be given to the model, and the summary exists so the chunk can be found. This differs from storing only extracted facts; an existing controlled experiment also shows that raw-text chunks clearly outperform storing only extraction results [5].
+1. From messages more than 7 days before the cutoff, segments of 40 messages are sampled, stratified by time;
+2. A question-writing model writes 0–2 questions per segment, phrased the way a group member would casually ask and reworded where possible, and lists the IDs of the evidence messages;
+3. A separate call looks only at the evidence and judges whether each question is valid.
 
-### 2.3 Evaluation
+This gave 440 questions for DEV-1 and 436 for DEV-2. The median evidence is only 2 messages, and the median distance from the evidence to the time of asking is 97 and 73 days.
 
-- **Questions**: 876 cross-week QA items, generated by a model from earlier chat and checked by a separate call; 105 of them were reviewed by three people. Each question is asked once while its answer is visible; another 150 are also asked before the answer appears, to test abstention.
-- **Temporal visibility**: enforced by the framework; retrieval can only see colors that ended before `as_of`.
-- **Injection budget**: a fixed number of characters (mostly 1,500), filled in rank order and stopping when the next chunk does not fit; duplicate messages are counted once.
-- **Judging**: another model acts as judge. Each question is scored as correct, wrong or empty answer (mostly safety refusals). **End-to-end accuracy** (an empty answer counts as a failure) is the primary metric; **effective-answer accuracy** is reported for reference.
-- **Statistics**: schemes are compared question by question with bootstrap 95% confidence intervals; a difference is called "significant" only if the interval excludes 0. No correction for multiple comparisons was applied.
-- **Ledger**: every experiment is recorded as one row, with token usage recorded separately by role.
+A **fictional** example:
 
----
+```text
+Evidence (fictional):  Mar 2, A: that hotpot place we went to on Saturdays closed — it's a barbecue place now
+Question (fictional):  What happened to the hotpot place everyone used to go to?
+Reference answer:      It closed and became a barbecue place
+```
 
-## 3. Results: retrieval and injection
+**Two known limitations of the questions**:
 
-### 3.1 Raw text or summaries
+- **Human review covers only part of them**: the 105 questions of DEV-1's first round were reviewed by three people, who removed only 1; the 335 questions of DEV-1's second round and DEV-2's 436 questions were not reviewed by humans.
+- **The same model wrote the questions, colored the messages and wrote the summaries**: question wording may naturally sit close to the summaries, which favors "retrieval by summary".
 
-| Given to the model | DEV-1 end-to-end | DEV-2 end-to-end |
-|---|---:|---:|
-| Raw-text chunks (BM25 over raw text) | 74.3 | 56.0 |
-| Summaries (BM25 over summaries) | 53.4 | 45.2 |
-| Retrieve by summary, give raw text | 70.9 | 55.0 |
+Each question is asked once while its answer is visible; another 150 are also asked before the answer appears, to see whether the system says "no record".
 
-(1,500-character budget.)
+### 2.3 Models
 
-**Giving only summaries is significantly worst**: 20.9 and 10.8 percentage points below raw-text chunks. The details a summary drops are exactly what QA needs. Retrieving by summary and giving raw text performs about the same as retrieving raw text directly. This is consistent with the existing finding that raw-text chunks beat extraction results [5].
+| Use | Model |
+|---|---|
+| Question writing, coloring, answering | `gemini-3.8-flash-high` |
+| Judge | `gpt-6.1-sol` (a different model family from the answering model); the earliest round used a Gemini judge, with 96–98% agreement between the two |
+| Embeddings | `qwen3.7-text-embedding-flash` (V0, V2); `qwen3.7-text-embedding` (M1) |
+| Labeling recall samples | `deepseek-chat` |
+| Impression formation | `gemini-3.8-flash-high` |
+| Compaction and session experiments | `deepseek-flash` |
 
-### 3.2 Keywords and vectors
+226 human-checked judgments agreed with the judge 99.6% of the time.
 
-At first, vector retrieval alone had lower evidence recall than BM25 on every route and at every candidate depth. A later ablation found this was mainly a **configuration problem**: the embedding calls did not distinguish queries from documents, and queries carried no retrieval instruction. The Qwen3 Embedding paper [7] explicitly uses an "instruction + query" input. After the fix:
+### 2.4 Metrics, budget and temporal visibility
 
-| Vector configuration | DEV-1 raw-text route R@5 | DEV-2 raw-text route R@5 |
-|---|---:|---:|
-| Original configuration | 73.0 | 49.8 |
-| Separate query/document + retrieval instruction | 80.7 | 63.5 |
-| Same, with a larger model | 84.5 | 67.2 |
-| Reference: BM25 raw-text route | 80.7 | 59.4 |
+- **Temporal visibility**: enforced by the framework; retrieval can only see colors that ended before the time of asking, so answers cannot leak.
+- **Injection budget**: mostly 1,500 characters. Chunks are added in rank order and packing stops when the next one does not fit; duplicate messages are counted once. The other setting is "filtering": a cheap model first picks the relevant candidates, with no character limit.
+- **End-to-end accuracy** (primary metric): correct questions ÷ all questions. An empty answer (mostly safety refusals) counts as a failure.
+- **Effective-answer accuracy**: correct questions ÷ questions with a non-empty answer. Refused questions may be easier or harder than average, so this is reported for reference only and not used for ranking.
+- **Evidence-inclusion rate**: the share of questions whose injected content contains at least one evidence message.
+- **Retrieval-level recall R@k**: the share of questions where a route's top k chunks contain the evidence; retrieval only, no answering model.
 
-The vector raw-text route matched or exceeded BM25, with the largest gains on questions with low lexical overlap. Two smaller findings: removing pseudonyms made the raw-text route significantly worse, which suggests "who said it" is itself a useful retrieval signal; and prepending the summary to the raw text made things worse.
+### 2.5 Statistics
 
-But **only a small part of the recall gain turned into accuracy**: vector-route R@5 rose by 6–17 percentage points, while the evidence-inclusion rate after four-route fusion rose by only 1–3 points, because the keyword routes already covered most of the evidence.
+Schemes are compared question by question, with bootstrap 95% confidence intervals for the difference; a difference is called "significant" only if the interval excludes 0. **No correction for multiple comparisons** was applied, so comparisons that only just pass should be considered weak evidence. Identical answer requests are reused by hash, and abandoned experiments are kept in the ledger.
 
-### 3.3 Multi-route fusion and candidate depth
+### 2.6 Configuration versions: which experiments can be compared
 
-Fusing the four routes (summary/raw × BM25/vector) with reciprocal rank fusion (RRF [8]) was the best of all schemes. But the effect depends heavily on **how many candidates each route contributes** (the table below is under the initial vector configuration; after switching to the correct configuration this was retested, and top 5 per route was still the best on both groups):
+The experiments span several configuration changes. **Only results under the same versions can be compared directly**; each experiment below states which versions it used.
 
-| Candidates per route | DEV-1 end-to-end | DEV-2 end-to-end |
-|---:|---:|---:|
-| 3 | 83.0 | 69.3 |
-| **5** | **82.7** | **70.6** |
-| 10 | 82.0 | 70.0 |
-| 20 | 81.1 | 66.7 |
-| 30 | 79.8 | 66.3 |
-
-With 30 candidates per route, chunks that rank mediocre in several routes accumulate RRF score and push out key evidence that ranks first in only one route, beyond the 1,500-character budget. 3–10 per route is a plateau; 20 or more is significantly worse on DEV-2. The frozen version takes the top 5 per route.
-
-The packing method also matters. Filling strictly in RRF rank order, or taking from the routes in turn, both work well; reserving a fixed number of characters per route, or discounting scores by "newly added characters", are both significantly worse (−11 to −24 percentage points).
-
-### 3.4 The frozen version
-
-The final frozen retrieval is: four routes, top 5 per route, global RRF (k=60), raw text packed in rank order up to 1,500 characters, duplicate messages removed.
-
-| | DEV-1 | DEV-2 |
-|---|---:|---:|
-| 10-message-window baseline (same budget) | 70.2 | 53.4 |
-| ① Initial frozen version (D-028) | 82.7 | 70.6 |
-| ② ① + correct vector configuration (D-029) | 85.5 | 71.3 |
-| ③ ② + de-duplication of batch overlap (D-032, current version) | 84.1 | 71.1 |
-
-- ① over the window baseline (+12.5, +17.2) is significant on both groups.
-- ② vs ①: DEV-1 +2.7 (95% CI +0.5 to +5.2, significant), DEV-2 +0.7 (−2.3 to +3.4, not significant).
-- ③ vs ②: DEV-1 −1.4 (−3.4 to +0.7), DEV-2 −0.2 (−2.5 to +2.1), neither significant. ③ did not improve accuracy; it was kept because it removes duplicate coloring and is the more sound design (D-032).
-
-### 3.5 Where the errors are
-
-For questions whose evidence entered the context under the frozen version, the model answered 92.9% (DEV-1) and 94.6% (DEV-2) correctly. The remaining loss is mainly **evidence that did not get in**: on DEV-2, 28% of questions had no evidence in the injected context. So the next thing to improve is recall, not answering.
-
-For the few questions answered wrongly even though the evidence was present, the evidence chunks were on average further back, with more distracting text before them. This points in the same direction as the finding that performance drops when relevant information sits in the middle of a long context [6], but our injection is only about 1.3k characters — very different conditions — and no causal test was done.
-
-Two other checks:
-
-- **BM25 scores cannot decide "when to stay silent"**: comparing the top score for the same query with the answer visible and not visible gives a discriminative power (AUC 0.55–0.61) close to chance. Whether to recall should be left to the model.
-- **A filtering model**: first having a cheap model pick the relevant candidates cut the injected messages from 71 to 11 on average, with no significant drop in accuracy.
-
-### 3.6 Problems with coloring itself
-
-The design allows a message to belong to several colors. A batch-by-batch check found **almost no multi-color messages within a batch** (only 3 and 30 in the two groups); the statistical "13% multi-color" came almost entirely from the overlap region between adjacent batches being colored twice. In other words, the model was effectively doing **near-single-label local segmentation**.
-
-Merging similar colors from adjacent batches into long chunks significantly lowered the evidence-inclusion rate (−5.9 and −7.3 percentage points), because one long chunk can fill the whole budget. Only removing duplicates while keeping chunk boundaries had no measurable effect. Adding a layer of "global topics" did not help either. Conclusion: retrieval quality depends mainly on local segment structure. The real structural problems (the model does not assign multiple colors on its own, and colors cannot continue across batches) need to be solved at the coloring stage; that has not been done.
+| Dimension | Version | Meaning |
+|---|---|---|
+| Vectors | V0 | Queries and documents not distinguished; no retrieval instruction on queries (the original implementation) |
+| | V2 | Queries and documents distinguished, retrieval instruction on queries (the frozen version from D-029) |
+| | M1 | V2's configuration with a larger embedding model (candidate, not adopted) |
+| Coloring post-processing | A | Original coloring |
+| | B | De-duplication of the batch-overlap region without changing chunk boundaries (the frozen version from D-032) |
+| Scoring | v1 | Visible questions only; empty answers count as wrong |
+| | v3 | Three states (correct/wrong/empty), end-to-end as the primary metric. v1 and v3 give the same end-to-end numbers; v3 also reports effective-answer accuracy |
+| | v2 | Drops questions refused under any scheme (sensitivity analysis only) |
 
 ---
 
-## 4. Results: memes and people
+## 3. RQ1: When recalling, raw text or summaries?
 
-### 4.1 Memes
+**Motivation.** Summaries are short, so more events fit in the same budget; raw text is long but loses no detail. Many memory systems store summaries or extracted facts by default.
 
-**The model understands only about half of general memes and barely understands group-specific ones.** Tested on 71 words whose meanings were confirmed by humans (with no memory at all):
+**Hypothesis.** If questions ask about details, giving only summaries will be significantly worse; retrieving by summary and then giving raw text can get the best of both.
+
+**Fixed**: BM25 retrieval, coloring A, no vectors, the same answering model and judge, a 1,500-character budget. **Varied**: what is retrieved and what is given to the model.
+
+| Scheme | Retrieval | Given to the model | DEV-1 | DEV-2 |
+|---|---|---|---:|---:|
+| A | BM25 over raw-text chunks | Raw text | 74.3 | 56.0 |
+| B | BM25 over summaries | Summaries | 53.4 | 45.2 |
+| C | BM25 over summaries | Raw text | 70.9 | 55.0 |
+
+(End-to-end accuracy %, scoring v1/v3.)
+
+**Result.** B is 20.9 and 10.8 percentage points below A, significant on both groups. Notably, B's "evidence-inclusion rate" is not low (the summary of the color containing the evidence was found), but the summary lacks the details needed to answer. C is close to A. The conclusion is the same under the "filtering" setting.
+
+**Interpretation and limitations.** Question wording may favor summaries (section 2.2), yet giving only summaries was still worst, which makes the conclusion more credible. This matches the direction of an existing controlled experiment [5]: chunks that keep the raw text beat storing only extracted results.
+
+**Effect on the design.** Summaries serve only as retrieval entry points; answering always uses raw text. This became a premise of every later scheme.
+
+## 4. RQ2: Is coloring better than fixed windows? Does the model really assign multiple colors?
+
+### 4.1 How useful is coloring as a way of chunking?
+
+**Motivation.** Group chat interleaves, so a fixed window mixes unrelated talk together, while a single message is too short. The idea of coloring is to group messages of the same micro-context together even when other talk sits between them.
+
+**Hypothesis.** Under the same budget, raw text chunked by color gets the evidence into the context more often than a fixed window, with a larger advantage on questions with low lexical overlap (reworded questions).
+
+**First-round retrieval-level experiment** (106 early DEV-1 questions, BM25 only, whether the top 10 contain the evidence):
+
+| Scheme | R@10 | vs. "BM25 + 10-message window" | 40 questions with low lexical overlap |
+|---|---:|---|---|
+| Search colored raw-text chunks | 81.1 | +8.5 (+1.9, +15.1), significant | +17.5 (+2.5, +32.5), significant |
+| Search color summaries | 76.4 | +3.8 (−5.7, +13.2) | +22.5 (+2.5, +42.5), significant |
+| Single messages | 57.5 | −15.1, significant | −15.0, significant |
+
+But a color chunk averages 15.6 messages, larger than a 10-message window. When the budget is controlled by "how many messages were read", color chunks only catch up with windows at 100 messages and fall behind at small budgets.
+
+**QA level** (1,500-character budget, BM25, coloring A, scoring v1): searching colored raw-text chunks beat a 10-message window by 4.1 percentage points (DEV-1; the original record gives no paired interval) and 2.5 points (DEV-2, −2.2 to +7.5, not significant).
+
+**Conclusion.** The advantage of coloring as a way of chunking is **not solid**: it helps on questions with low lexical overlap, but overall it did not beat windows significantly on both groups. Most of the gains seen later come from multi-route fusion and shallow candidate lists (RQ4). Coloring's more important role may be making the "retrieval by summary" route possible.
+
+### 4.2 A counter-intuitive finding: the model barely assigns multiple colors
+
+The design allows a message to belong to several colors, and the first statistics showed about 13% of covered messages belonging to more than one. A batch-by-batch check found:
+
+- **almost no multi-color messages within a batch**: only 3 and 30 in the two groups;
+- the statistical "13% multi-color" came almost entirely from the 20 messages of overlap between adjacent batches being colored once by each batch.
+
+In other words, the model was effectively doing **near-single-label local segmentation**; the "multiple colors" design was never really realized.
+
+### 4.3 A counter-intuitive finding: merging colors into long chunks makes things worse
+
+Since the overlap region produced two similar colors, a natural idea is to merge them. We compared several treatments (vectors V2, four routes, top 5 per route, 1,500 characters):
+
+| Treatment | What it does | Evidence-inclusion rate (vs. original) |
+|---|---|---|
+| merged-v1 | Merge matching colors from adjacent batches into one, possibly across many batches | **−5.9 / −7.3, significant on both groups** |
+| dedup-v1 | Keep overlap-region messages only in the earlier batch's color | −0.9 / −0.9, not significant; QA level −0.7 / −1.1, not significant |
+| B | De-duplicate only for indexing and ranking; inject the original chunks | −0.5 / −0.5, not significant; QA level −1.4 / −0.2, not significant |
+| C | B plus a layer of "global topics" | +0.2 / −1.4, not significant |
+
+After merging, the longest color spanned 8 batches (one color ran to 379 messages), and a single long chunk could fill the whole 1,500-character budget. **Retrieval quality depends on local segment structure, not on bigger chunks.**
+
+**Effect on the design.** The frozen version adopts B (D-032): it did not improve accuracy, and was kept because it removes duplicates without changing chunk boundaries. The real structural problems (the model does not assign multiple colors on its own, and colors cannot continue across batches) need to be solved at the coloring stage, for example by carrying a batch's unfinished colors into the next batch; that requires re-coloring and has not been done.
+
+## 5. RQ3: What do keywords and vectors each contribute?
+
+**Motivation.** Chinese group chat has short sentences and much slang, which may hurt pure vectors; but keywords cannot find questions that were reworded.
+
+This question is answered in three steps. **The three steps use different conditions and must not be compared with each other.**
+
+### 5.1 Single-route QA (vectors V0, coloring A, 1,500 characters)
+
+A single vector route (over raw-text chunks) scored 73.2 / 57.8 end to end, against 74.3 / 56.0 for a single BM25 route; on every route and at every candidate depth, vector evidence recall was below the corresponding BM25 route. The conclusion at the time was that "vectors alone are worse than BM25".
+
+### 5.2 Retrieval-level ablation: the problem was configuration (retrieval only, no answering model)
+
+An audit found that the vector calls did not match the design: queries and documents were not distinguished, and queries carried no retrieval instruction; the Qwen3 Embedding paper [7] explicitly uses an "instruction + query" input.
+
+**Fixed**: the two keyword routes unchanged; four routes, top 5 per route, 1,500 characters, coloring A. **Varied**: only the vector call configuration and model.
+
+| Vector configuration | DEV-1 raw-text route R@5 | DEV-2 raw-text route R@5 | Frozen version's evidence-inclusion rate (vs. V0) |
+|---|---:|---:|---|
+| V0 | 73.0 | 49.8 | — |
+| V2 | 80.7 | 63.5 | +1.1 / +1.4 |
+| M1 | 84.5 | 67.2 | +2.3 / +3.4 |
+| Reference: BM25 raw-text route | 80.7 | 59.4 | |
+
+With the correct configuration, the vector raw-text route matched (DEV-1) or exceeded (DEV-2) BM25, with the largest gains on questions with low lexical overlap. Two side findings: removing pseudonyms made the raw-text route significantly worse, which suggests "who said it" is itself a useful retrieval signal; and prepending the summary to the raw text made things worse.
+
+But **only a small part of the recall gain reached the context**: vector-route R@5 rose by 6–17 percentage points, while the evidence-inclusion rate after fusion rose by only 1–3 points, because the keyword routes had already found most of the evidence.
+
+### 5.3 QA level: how much of the recall gain becomes accuracy?
+
+**Fixed**: four routes, top 5 per route, 1,500 characters, coloring A, the same answering model and judge. **Varied**: vectors V0 / V2 / M1.
+
+| Comparison | DEV-1 end to end | DEV-2 end to end |
+|---|---|---|
+| V2 − V0 | **+2.7 (+0.5, +5.2)** | +0.7 (−2.3, +3.4) |
+| M1 − V0 | +2.0 (−0.9, +4.8) | +2.8 (−0.2, +6.0) |
+| M1 − V2 | −0.7 (−3.4, +2.0) | +2.1 (−0.7, +4.8) |
+
+A sign test over both groups combined: V2 vs. V0 p≈0.10, M1 vs. V0 p≈0.03. Question by question, nearly every question whose evidence newly got in became correct, but such questions are only 2–3% of the total; questions where "both sides have the evidence" also show symmetric random fluctuation, and part of V2's significant gain on DEV-1 comes from that fluctuation, so it cannot all be credited to recall.
+
+**Effect on the design.** The frozen version switched to V2 (D-029): same model, zero extra cost. M1 is a candidate improvement to be decided after validation on the test set.
+
+## 6. RQ4: How to fuse routes, how deep to go, and how to pack the budget?
+
+### 6.1 How fusion evolved
+
+| Stage | Scheme | DEV-1 | DEV-2 |
+|---|---|---:|---:|
+| Two keyword routes, 30 candidates per route | D@1500 | 75.2 | 60.3 |
+| Vectors added, four routes, 30 per route | DV | 79.8 | 66.3 |
+| Four routes, 10 per route, packed strictly in RRF rank order | E1 | 82.0 | 70.0 |
+| Four routes, 5 per route | K5 (initial frozen version) | 82.7 | 70.6 |
+
+(Vectors V0, coloring A, 1,500 characters, end to end %.)
+
+### 6.2 Candidate depth
+
+**Hypothesis.** The more candidates per route, the higher the recall and the higher the accuracy.
+
+**Fixed**: four routes, global RRF (k=60), strict packing into 1,500 characters, vectors V0, coloring A. **Varied**: candidates per route, K.
+
+```mermaid
+xychart-beta
+  title "Candidates per route K vs. end-to-end accuracy (four-route RRF, 1500 chars, vectors V0)"
+  x-axis "K" [3, 5, 10, 20, 30]
+  y-axis "Accuracy %" 60 --> 90
+  line "DEV-1" [83.0, 82.7, 82.0, 81.1, 79.8]
+  line "DEV-2" [69.3, 70.6, 70.0, 66.7, 66.3]
+```
+
+**The result contradicts the hypothesis.** Going from K=10 to 20 and 30 was significantly worse on DEV-2 (K20−K10 −3.2, K30−K10 −3.7). The share of questions whose "evidence is among the candidates but was not packed into the budget" rises steadily with K: from 4.1% to 10.7% on DEV-1, and from 6.7% to 22.7% on DEV-2.
+
+**Mechanism.** RRF gives the top-ranked item of a route a score of 1/61 ≈ 0.016, while a chunk ranked 12th in two routes gets 2/72 ≈ 0.028. The larger K is, the more chunks that "rank mediocre in several routes" there are, and their accumulated scores push key evidence that ranks first in only one route out of the budget.
+
+**Limitations.** The differences between 3, 5 and 10 per route are not significant; 5 was chosen because it ranked first or near first on both groups and had the highest evidence-inclusion rate, and it was picked on the same set of questions. Retested with vectors V2, top 5 per route was still best on both groups (its difference from K10 not significant).
+
+### 6.3 Packing into the budget
+
+| Packing method | Four routes, vs. strict RRF (E1) |
+|---|---|
+| Take from the routes in turn (E2) | +0.7 / −0.7, not significant |
+| Reserve a fixed number of characters per route (E3) | −23.9 / −17.9, significantly worse |
+| Discount RRF scores by "newly added characters" (E4) | −10.7 / −12.2, significantly worse |
+
+The large drops for E3 and E4 are **mainly implementation defects**, not evidence against the idea of "guaranteed slots per route": among questions E1 answered correctly and E3 got wrong, the vast majority were cases where the long chunk containing the evidence was discarded. Another guaranteed-slot implementation (2–3 chunks per route first, then filled up by RRF) did not show this problem, but did not beat the gain from reducing candidate depth either.
+
+### 6.4 The frozen version's lineage
+
+| Version | What changed | DEV-1 | DEV-2 |
+|---|---|---:|---:|
+| 10-message window baseline | Same 1,500 characters | 70.2 | 53.4 |
+| ① Initial (D-028) | Four routes, top 5 per route, vectors V0, coloring A | 82.7 | 70.6 |
+| ② ① + vectors V2 (D-029) | Only the vector call configuration | 85.5 | 71.3 |
+| ③ ② + coloring B (D-032, current) | Only how the overlap region is indexed | 84.1 | 71.1 |
+
+- ① vs. the window baseline: +12.5, +17.2, significant on both groups.
+- ② vs. ①: DEV-1 +2.7 (+0.5, +5.2), significant; DEV-2 +0.7 (−2.3, +3.4), not significant.
+- ③ vs. ②: DEV-1 −1.4 (−3.4, +0.7), DEV-2 −0.2 (−2.5, +2.1), neither significant.
+
+## 7. RQ5: Where do the remaining errors come from?
+
+**Once the evidence is in, the model uses it well.** Under the initial frozen version, the model answered 92.9% (DEV-1) and 94.6% (DEV-2) of questions correctly when the evidence entered the context. Of the 28 such questions DEV-1 got wrong, 10 were empty answers.
+
+**The main loss is evidence that did not get in.** On DEV-2, 28% of questions had no evidence in the context. Part of this is "among the candidates but squeezed out by the budget" (initial frozen version: DEV-1 5.5%, DEV-2 7.6%); the rest was not in any route's top 5.
+
+**For the few questions answered wrongly even though the evidence was present**, the evidence chunks were on average further back, with more distracting text before them. This points the same way as the finding that performance drops when relevant information is in the middle of a long context [6], but our injection is only about 1.3k characters — very different conditions — and no causal test was done.
+
+**Three further checks**:
+
+- **Can retrieval scores decide "don't recall"?** Comparing the top BM25 score for the same query with the answer visible and not visible gives a discriminative power of only AUC 0.55–0.61, close to chance. Whether to recall should be left to the model.
+- **Is a filtering model worth it?** On the 106 early questions, first having a cheap model pick the relevant candidates cut the injected messages from 71 to 11 on average, with an accuracy difference of −1.9 (−8.5, +4.7), not significant.
+- **Safety refusals.** About 2.2% of the answering model's calls returned empty; the empty-answer rate per scheme ranged from 0.2% to 3.4%, and the more numerous and mixed the injected content, the more likely it was. So the primary metric counts empty answers as failures; after dropping questions refused under any scheme (scoring v2), the direction of the conclusions is unchanged, and only a few comparisons that just passed became non-significant.
+
+## 8. RQ6: Does the model understand the group's memes?
+
+### 8.1 How much does the model know without memory?
+
+**Setup**: 71 words whose meanings were confirmed by two rounds of human labeling, split per D-033 into a general layer (56) and a group layer (15); the answering model has no memory at all, and the judge scores "right / wrong / don't know".
 
 | Condition | General layer | Group layer |
 |---|---:|---:|
 | Word only | 48.2% | 26.7% |
-| Word + a chat snippet using it | 64.7% | 26.7% |
+| Word + a chat snippet using it (3 messages) | 64.7% | 26.7% |
 
-Adding a snippet of context significantly helps the general layer (+17.6 percentage points, 95% CI +3.9 to +31.4; small sample). The group layer has only 15 words, and context did not help (4 correct, unchanged); a meme table is required. The model answers "I don't know" about 30% of the time, and when it does give an explanation it is mostly right, so "I don't know" can serve as a trigger for consulting the meme table or searching the web.
+- Context significantly helps the general layer: +17.6 (+3.9, +31.4), small sample.
+- The group layer has only 15 words; 4 were answered correctly, unchanged with context, and the share of "don't know" answers rose from 47% to 60%. One chat snippet is not enough to infer a group-specific meaning.
+- The model answers "don't know" about 30% of the time, and when it does give an explanation it is mostly right, so "don't know" can serve as a signal to consult the meme table or search the web.
 
-**The meme table's recall is the main bottleneck.** When looking up relevant history by context alone, raw-text retrieval almost never finds the target word (only 2–5% of results contain it). The meme table finds some, raising fill-in accuracy from 10.6% to 15–18% (significant, but on a small sample: 85 questions, 40 words, and the words were not human-confirmed). Human annotation found that group-specific memes are mostly lost at the "evidence threshold" step: the threshold (at least 5 occurrences, 3 people, 2 days) kept out many genuine group memes.
+### 8.2 Does a meme table help?
 
-The meme table therefore has two layers: general memes are shared across groups, group-specific memes stay within their group; updates go through "candidates + human confirmation" and are never rewritten automatically.
+**Setup**: DEV-1; the table is built only from messages in the first 70% of the time span and tested on the last 30%; 85 questions, 40 words, and the words were not human-confirmed.
 
-Among related open-source implementations, MaiBot's slang learning [9] decides whether a word is slang by checking whether "the meaning inferred from context" agrees with "the meaning inferred from the word alone". None of the projects we surveyed goes beyond "storing an explanation"; none measures "having learned it", that is, whether the bot can correctly understand and use the term in new conversations.
+| Test | No memory | Raw-text retrieval | Meme table |
+|---|---:|---:|---:|
+| Free fill-in, recalling by context only | 10.6% | 10.6% | 15.3–17.6% (two ways of building the table, both significant) |
+| Four-way multiple choice (all options are table words) | 64.7% | — | 78.8% (look up the entry), 80.0% (5 historical example sentences) |
 
-### 4.2 People
+When looking for relevant history by context alone, raw-text retrieval almost never finds the target word (only 2–5% of results contain it). The meme table finds some, but its recall is still very low, and this is the main bottleneck for the next step.
 
-In one group, 27 of 104 people changed their name; merging by name would split them into 40 extra identities. Human annotation also found 6 people each with 2–3 accounts **in use at the same time**. People must be tracked by stable account, with support for multiple accounts per person; nicknames also often come from other groups or from outside the group.
+### 8.3 Where are candidates lost?
 
----
+One annotator labeled 33 entries from the machine-built meme table: 23 correct (69.7%), 6 partly correct, 4 incorrect. By type: 26 general internet terms, 4 catchphrases, 3 nicknames, and **0 group-specific memes**.
 
-## 5. Making memory human-like
+A sample of candidates the machine discarded showed that the **evidence threshold** (at least 5 occurrences, 3 people, 2 days) is the main leak: among 15 sampled candidates that failed the threshold, two-thirds were real terms, and a third of those were group memes (only 15 samples; this is an inference).
 
-The research above uses QA accuracy as its yardstick. But "being like a group member" has another side: people do not remember chats from months ago in perfect detail. This part **switches yardsticks** and judges by "how human-like".
+**Effect on the design.** The meme table has two layers (D-033); updates go through "candidates + human confirmation + rebuilt snapshot", never automatic rewrites (D-039); the next step is to relax or rewrite the evidence threshold. Among related open-source implementations, MaiBot's slang learning [9] decides whether a word is slang by checking whether "the meaning inferred from context" agrees with "the meaning inferred from the word alone"; none of the projects we surveyed goes beyond "storing an explanation", and none measures whether the bot has really "learned" the term.
 
-### 5.1 From mechanisms to behavior
+## 9. RQ7: How should people be identified?
 
-We first read mechanistic research on memory from cognitive science: complementary learning systems [10], emotional modulation of consolidation [11], event segmentation [12, 13], and so on. These describe neural mechanisms and give no behavioral numbers that could be used for tuning. Existing "human-like memory" systems [14, 15] take the same route: all use hand-set decay constants, and none has had humans judge "how human-like" they are. The only one with serious human evaluation, MADial-Bench [16], shows that human-likeness can only be judged by people, and that automatic metrics disagree with human rankings. Another study [17] found that models do not forget what is in their context and show no serial-position effect, so human-likeness cannot be expected to come from the model itself.
+- In DEV-1, 27 of 104 people changed their name; merging by name would split them into 40 extra identities. Since no two people share a name, "finding people by name" scores 100%, so that metric has no discriminative power.
+- Human annotation identified 11 people across 18 accounts; 6 people each had 2–3 accounts **with overlapping activity**, not switched accounts.
+- Of the 9 nicknames labeled, 3 never appear in this group's record at all; they come from other groups or from outside.
 
-Turning instead to **how people behave when recalling conversations**, there are concrete behavioral numbers: 20 minutes after a three-person conversation, people can recall only 12–30% of it, but about 96% of what they recall is correct, and about 96% of the attributions of who said it are correct [18]. So "human-like" is mainly about **low coverage, gist rather than wording, and appropriately hedged statements**, not about misremembering. This conflicts with accuracy less than we first thought. Another study warns that memory consolidation can turn hedged statements into confident facts [19], so the original uncertain wording should be preserved in storage.
+**Effect on the design.** People are tracked by stable account, with support for several accounts per person; the people table is shared across groups.
 
-### 5.2 How group members themselves recall
+## 10. RQ8: How can memory be made "human-like"?
 
-We looked for "group members recalling" passages in the development groups (containing markers such as 记得 "remember", 上次 "last time", 来着 "what was it again") and had a model label them:
+The research above uses QA accuracy as its yardstick. But "being like a group member" has another side: people do not remember chats from months ago in perfect detail. This part **switches yardsticks**; all results so far only show that the mechanisms are feasible and **have not been validated by humans**.
 
-- Most of what group members recall is not group chat; recalls of in-group conversations are only 14–20%.
-- They almost never quote the original words (2–3%); about 60% give the gist and about 30% only mention that something happened; about 20% use uncertain wording.
-- The step of "matching a recall to the original message" is currently unreliable: two models' judgments almost never agreed.
+### 10.1 From mechanisms to behavior
 
-Based on this we built a **recall-policy layer** v0: without calling a model, it uses "who said it, how long ago, whether it was a joke, whether it was brought up again later" to decide, for each piece of evidence, whether to give the original words, the gist, only that it happened, or nothing. The memory text given to the answering model dropped from about 1,280 characters to 210–540. No answers have been generated with it yet, and there has been no blind evaluation.
+Mechanistic research from cognitive science (complementary learning systems [10], emotional modulation of consolidation [11], event segmentation [12, 13]) gives no behavioral numbers to tune against. Existing "human-like memory" systems [14, 15] all use hand-set decay constants, and none has had humans judge "how human-like" they are; the only one with serious human evaluation, MADial-Bench [16], shows that human-likeness can only be judged by people and that automatic metrics disagree with human rankings. Another study [17] found that models do not forget what is in their context and show no serial-position effect, so human-likeness cannot be expected to come from the model itself.
 
-### 5.3 Impression formation
+Turning to behavioral data on how people recall conversations: 20 minutes after a three-person conversation, people can recall only 12–30% of it, but about 96% of what they recall is correct, and about 96% of the attributions of who said it are correct [18]. So "human-like" is mainly about **low coverage, the gist, and appropriately hedged wording**, not about misremembering. Another study warns that memory consolidation can turn hedged statements into confident facts [19], so the original uncertain wording should be kept in storage.
 
-The user rejected "fading by time elapsed" and asked instead for the model to **form impressions of events**. The model reads the chat in chronological order, knowing only what came before, and states which things would leave an impression, how deep (deep, medium, shallow), why (funny, surprising, conflict, big event, novel, emotional), and writes down the gist; for deep impressions it also records one or two original sentences. At recall time the granularity depends on the depth of the impression. Time itself is not an input.
+### 10.2 How group members themselves recall (labeling pilot)
+
+**Setup**: in the two development groups, messages containing recall markers (such as 记得 "remember", 上次 "last time", 来着 "what was it again") were found by regular expressions and labeled by `deepseek-chat` with their surrounding context; **the labels were not checked by humans**.
+
+- Recalls of in-group conversation are only 14–20%; most recalls are about experiences outside the group; only 126 usable samples across both groups.
+- Only 2–3% quote the original words; about 60% give the gist and about 30% only mention that something happened; about 20% use uncertain wording.
+- "Which original message does this recall refer to" is not reliable: the same 42 recalls were judged once by each of two models; 24 were matched to an original message by at least one model, and the two models pointed to the same line for only 4.
+- Quote-replies are not recall: across both groups, 10,792 quote-replies have a median gap of about half a minute to the quoted message, 99% within 4.5 hours, and only 6 quote a message more than a day old.
+
+Based on this we wrote a **recall-policy layer v0**: without calling a model, it uses "who said it, how long ago, whether it was a joke, whether it was brought up again later" to decide, for each piece of evidence, whether to give the original words, the gist, only that it happened, or nothing. In a dry run, the memory text given to the answering model dropped from about 1,280 characters to 210–540. **No answers have been generated with it, and there has been no blind evaluation.**
+
+### 10.3 Impression formation
+
+The user rejected "fading by time elapsed" and asked for the model to form impressions of events (D-044).
+
+**Setup**: the chat is cut by day and read by the model in chronological order; for each segment the model knows only what came before and its own sense of "what this group is usually like"; it outputs the events in this segment that would leave an impression, their depth (deep / medium / shallow), the reason and the gist, and for deep impressions one or two original sentences. Time itself is not an input. Only the development groups were used.
 
 - **"Most of it drifts by like passing clouds" did emerge**: messages that left an impression were 12–16% of the total, more than half of the days left nothing, and the number of impressions per month did not decline over time.
-- **Whether "some sentence is remembered vividly" depends on one sentence in the prompt**: with the line "deep ones are rare; don't exaggerate" in the prompt, there were almost no deep impressions; without it, there were some. The threshold is set by wording, and there is currently no basis for saying which is more human-like.
-- **The gist is too short to answer detailed questions**; the benchmark questions are a rather harsh test for impression-based memory.
-- Whether the model's impressions match a human's **has not been tested at all**; the blind-evaluation page is ready but the evaluation has not been completed.
+- **Whether "some sentence is remembered vividly" depends on one sentence in the prompt**: with "deep ones are rare; don't exaggerate", DEV-1 had 0 deep impressions in five months; without it, there were 6, with 11 sentences remembered verbatim. The threshold is set by wording, and there is currently no basis for saying which is more human-like.
+- **The gist is too short**: each event's gist is limited to 40 characters, while an event's median length is 45–51 messages; asked the benchmark questions, it mostly answered "I don't remember" or "only roughly". The benchmark questions were written to probe details and are a rather harsh test for impression-based memory.
+- Compared with what group members themselves later brought up, no relationship was visible (only about 30 samples per group, and the correspondences were not checked).
+- **Whether the model's impressions match a human's has not been tested at all**; the blind-evaluation page is ready, but the evaluation has not been completed.
 
 This part is close in spirit to Generative Agents' [20] "recency × importance × relevance" and EM-LLM's [21] "segmenting events by surprise", but it has no time decay; impressions form "at the moment of reading".
 
----
+## 11. Engineering experiments: usability checks
 
-## 6. Engineering findings
+These experiments use synthetic data and run each approach once; they answer "does it work", not "how well".
 
-These are not the main line of the memory research, but may be useful when building similar systems.
+| Question | Setup | Result |
+|---|---|---|
+| Can the persona-bearing model write its own compaction summary? | Synthetic three-person group chat, `deepseek-flash`, dsh 0.2.1-rc.4, a small window to force compaction | Yes. 93–97% of the summary request's input hit the cache; follow-up questions after compaction answered 2/2 and 3/3. Both the persona and built-in versions described "the message just replied to" as "not yet replied to" |
+| A new session each day, or one long session? | Three simulated days, the same small window | The long session made 34 calls vs. 44, with about half the uncached input, and answered directly from its summary on day three; cost is driven by the compaction threshold |
+| Does memory keep growing with consecutive handoffs? | One turn of about 400,000 characters of synthetic text, then 30 consecutive handoffs | Closing retired sessions left 1 live session (31 without closing); resident memory 262 MB vs. 290 MB |
 
-- **The persona-bearing model can write its own compaction summary.** Replacing the compaction prompt with "write a private memo to yourself in your own voice" gave 93–97% cache hits on the summary request's input, and after compaction the model answered follow-up questions correctly. Both kinds of summary share one flaw: they can describe "the message just replied to" as "not yet replied to". A summary cannot replace the raw text.
-- **Session lifetime**: under the same context limit, a long session is cheaper than starting a new session each day, and can pick up the past few days without querying the store. What drives cost is the compaction threshold, not whether sessions are cut daily. Providers with short-lived caches are the exception.
-- **Session handoff**: slow tasks (watching videos, long fact-checks) are finished in the old session while a forked new session keeps chatting in the group; retired sessions must be closed explicitly. The kernel itself needs no time limit; the host only needs "stall detection".
-- **Separating fact-checking from the persona**: web fact-checking runs in a separate conversation without the persona and returns only the conclusion, so role-play does not affect factual judgment.
-- **Model refusals**: about 2% of calls return empty, and the more numerous and mixed the injected content, the more likely this is. It is itself a cost of a scheme, which is why the primary metric counts empty answers as failures.
+## 12. External reference points
 
----
+- **Reproducing a public benchmark**: on GroupMemBench's [3] Technology subset (213 questions), per-message BM25 scored 44.6% overall (95% CI 38.5–51.2), against 46.0% reported in the paper. Used to confirm the evaluation framework is broadly sound, not to compare schemes.
+- **How public benchmarks differ**: LoCoMo [1] and LongMemEval [2] are mostly two-party dialogues; GroupMemBench and SocialMemBench [4] are synthetic English group chats; none include the short messages, slang, nickname changes and interleaving of Chinese group chats.
+- **Related findings**: a recent study points out that naive raw-text retrieval often matches complex memory systems on several memory benchmarks [22]. Our results point the same way (raw text and simple fusion work best), but we did not compare directly with memory frameworks such as Mem0 [23] or MemGPT [24] on the same data.
 
-## 7. Limitations
+## 13. Limitations and next steps
 
-- **Only two development groups**; the questions were model-generated (part of them human-reviewed) and parameters were chosen on the development sets. The frozen version has not been validated on an independent test set.
-- **No correction for multiple comparisons**; many comparisons only just pass the significance threshold and should be considered weak evidence.
-- **The judge is a model.** The human-reviewed sample is small.
-- **None of the "human-like" work has had human blind evaluation**; so far we can only say the mechanisms run.
-- **Coloring used one model and one prompt**; other segmentation methods (such as predicting reply relations first and then clustering) were not compared.
-- A recent study points out that naive raw-text retrieval often matches complex memory systems on several memory benchmarks [22]. Our results point in the same direction (raw text and simple fusion work best), but we did not compare directly against other memory frameworks [23, 24] on the same data.
+**Limitations**
 
-## 8. Unfinished directions
+- Only two development groups; the questions are model-generated and mostly not human-reviewed; parameters were chosen on the development sets; the frozen version has not been validated on an independent test set.
+- The same model wrote the questions, the coloring and the summaries; the judge is also a model.
+- No correction for multiple comparisons; several comparisons only just pass the significance threshold.
+- Coloring used one model and one prompt; other segmentation methods (such as predicting reply relations first and then clustering) were not compared.
+- None of the "human-like" work has had human blind evaluation.
 
-- A final test on the frozen groups.
-- Improving the coloring stage: letting colors continue across batches and encouraging multiple colors.
-- The meme table's evidence threshold: relax or rewrite it, and check against the existing human annotations.
+**Next steps**
+
+- A final test on the frozen groups (testing M1 at the same time).
+- Improve coloring: let colors continue across batches and encourage multiple colors, then evaluate with the retrieval-level experiments here.
+- Relax or rewrite the meme table's evidence threshold, and check it against the existing human annotations.
 - Deciding "whether to recall at all", using the last few chat messages as the query, and proactive mentions.
-- Human blind evaluation of impressions and the recall-policy layer.
-- Interference tests (whether injected irrelevant memories get forced into the conversation) and cross-group leakage tests.
+- Human blind evaluation of impressions and the recall-policy layer; interference tests (whether irrelevant memories get forced into the conversation) and cross-group leakage tests.
 
 ---
+
+## Appendix A: Tracing the conclusions
+
+| Conclusion | Original record (in Chinese) |
+|---|---|
+| Setup, question construction, human review, cost | [Phase-one report v1](../research/2026-11-memory-stage-report.md), sections 2, 4, 5 |
+| Raw text vs. summaries (RQ1) | Report v1 section 6; [results document](../memory-benchmark-results.md), "主实验" (main experiment) |
+| Coloring vs. windows at the retrieval level (RQ2) | Results document, "Q2：跨周问题" (cross-week questions) |
+| Multi-color comes almost entirely from batch overlap; merging, de-duplication, layering (RQ2) | Results document, "更正", "上色修正", "重叠重复与分层", "B 问答层补测" |
+| Keywords and vectors, vector ablation (RQ3) | Report v1 section 7; results document, "向量配置消融", "更好的向量能否变成准确率" |
+| Fusion, candidate depth, packing (RQ4) | Report v1 section 8; results document, "打包与保底", "候选深度 K", "候选深度 K 的 V2 补测" |
+| Scoring | [Report v3](../research/2026-11-memory-stage-report-v3.md); [v2](../research/2026-11-memory-stage-report-v2.md) (sensitivity analysis) |
+| Error analysis (RQ5) | Report v1 section 9; results document, "Q3" |
+| Memes (RQ6) | Results document, "Q9：梗", "梗表与人物：第一轮人工打标", "梗基线" |
+| People (RQ7) | Results document, "Q5：身份", "梗表与人物：第一轮人工打标" |
+| Human-likeness (RQ8) | [Directions survey](../research/2026-11-humanlike-memory-directions.md), [recall pilot](../research/2026-11-recall-pilot.md), [impression formation](../research/2026-11-impression-formation.md), [cognitive notes](../research/2026-11-cognitive-memory-notes.md) |
+| Engineering experiments | [Compaction and session lifetime](../research/2026-11-persona-compaction-and-session-lifetime.md), [handoff report v2](../research/2026-11-session-handoff-report-v2.md) |
+| Conditions and usage of each experiment | [Experiment ledger](../memory-benchmark-ledger.md) |
 
 ## References
 
