@@ -1,4 +1,19 @@
-# groupmind
+<div align="center">
+
+<h1>groupmind</h1>
+
+<p><b>A group-chat companion bot with long-term memory · research prototype</b></p>
+
+<p>
+<a href="LICENSE"><img alt="License: Apache-2.0" src="https://img.shields.io/badge/license-Apache--2.0-blue?style=flat-square"></a>
+<img alt="Python 3.12 | 3.13" src="https://img.shields.io/badge/python-3.12%20%7C%203.13-3776AB?style=flat-square&logo=python&logoColor=white">
+<img alt="OneBot v11" src="https://img.shields.io/badge/OneBot-v11-black?style=flat-square">
+<img alt="Status: research prototype" src="https://img.shields.io/badge/status-research%20prototype-orange?style=flat-square">
+</p>
+
+<p><b>简体中文</b> | <a href="README.en.md">English</a></p>
+
+</div>
 
 一个以「群友」身份待在 QQ 群里的聊天机器人，以及围绕它做的中文群聊长期记忆研究。
 
@@ -14,7 +29,7 @@
 在两个真实开发群（约 1.6 万和 4.6 万条消息）、876 道跨周问答题上：
 
 - **交给模型的必须是原文。** 只给摘要比给原文块低 10–21 个百分点。
-- **四路检索 + 浅候选。** 摘要和原文各用 BM25 和向量检索，RRF 融合、每路只取前 5，比同预算的固定窗口基线高 12.5 和 17.2 个百分点。每路取 20 个以上候选反而显著变差。
+- **四路检索 + 浅候选。** 摘要和原文各用 BM25 和向量检索，RRF 融合、每路只取前 5。冻结版初版比同预算的固定窗口基线高 12.5 和 17.2 个百分点（配对比较显著）。在 DEV-2 上，每路取 20 个以上候选反而显著变差。
 - **瓶颈在「找到」，不在「用好」。** 证据进入上下文后，模型能答对约 93–95%。
 - **模型基本不懂本群的梗**，给一段语境也没用，必须靠梗表；而梗表的召回又是下一步的主要瓶颈。
 - **「像人」要换一把尺子。** 人回忆对话是「记得少，但记得的基本是对的」。印象形成和回忆策略层的机制能跑通，但还没有用人工盲评验证。
