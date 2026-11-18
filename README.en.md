@@ -21,7 +21,7 @@ Web module: raising the success rate of reading web pages that have anti-bot pro
 Session handoff: when the model is stuck on a long tool call, a new session takes over, so the stuck old session no longer leaves group messages unanswered
 Around this goal, the project also ran a set of experiments on long-term memory for Chinese group chats.
 
-> **This is a work in progress.** The bot runs end to end in shadow mode (what it would say is only recorded, not sent to the group), and the memory research has fairly complete experiment records; but it has **never posted in a real group**, and deployment was never finished — it has only run in the author's own environment and is hard to reproduce as is. There are no plans to fix deployment for now; the project may be improved later.
+> **This is a work in progress.** The bot runs end to end in shadow mode (what it would say is only recorded, not sent to the group), and the memory research has fairly complete experiment records; but it has **never posted in a real group**, and deployment was never finished — it has only run in our own environment and is hard to reproduce as is. There are no plans to fix deployment for now; the project may be improved later.
 
 ## What it can do
 

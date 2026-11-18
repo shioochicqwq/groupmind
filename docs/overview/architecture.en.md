@@ -435,7 +435,7 @@ The shadow-test deployment is **a dedicated WSL2 distribution on a Windows PC** 
 
 | Layer | What it does | What it does not do |
 |---|---|---|
-| WSL distribution | Separate from the user's other environments; the default user is the non-root `bot` (`/etc/wsl.conf`: `[user] default=bot`) | Windows interop and automatic mounting are not disabled. The deployment script itself reads the update package from the Windows drive through `/mnt/d`, so the Windows drives are visible inside the distribution |
+| WSL distribution | Separate from the other environments on the machine; the default user is the non-root `bot` (`/etc/wsl.conf`: `[user] default=bot`) | Windows interop and automatic mounting are not disabled. The deployment script itself reads the update package from the Windows drive through `/mnt/d`, so the Windows drives are visible inside the distribution |
 | dsh sandbox policy | The kernel's own shell may write only to its workspace (`workspace-write`) | Does not restrict reading or network access |
 | Host tools | Per-group authentication; page reading has SSRF protection and a guard proxy | The host process itself runs as `bot` and can do whatever `bot` can |
 
@@ -489,7 +489,7 @@ The reason for replacing image descriptions: recall needs to be able to find "wh
 - **Implemented and running in shadow testing**: per-group sessions with persona compaction, memory retrieval, knowing people, fact-checking, watching videos, understanding stickers, session handoff.
 - **Research prototypes, not wired in**: coloring after going live (only counting is wired in), the event layer, impression formation, the recall-policy layer.
 - **Not verified**: actually posting, proactive speaking (does not exist), the frozen version on an independent test set, human blind evaluation of "human-likeness", tool calls longer than 5 minutes.
-- **Deployment is very unfriendly**: it has only run in the author's own Windows + WSL environment, relying on scheduled tasks and a script for pushing updates by hand; paths, accounts and the model gateway all carry traces of the author's environment.
+- **Deployment is very unfriendly**: it has only run in our own Windows + WSL environment, relying on scheduled tasks and a script for pushing updates by hand; paths, accounts and the model gateway all carry traces of our own environment.
 
 ## 8. Principles worth taking away
 

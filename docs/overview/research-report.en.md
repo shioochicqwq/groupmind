@@ -115,7 +115,7 @@ The retrieval configuration settled on after a series of experiments is called t
 
 ### 3.1 Data
 
-The data comes from the user's own QQ chat export. Groups were selected by aggregate statistics without looking at content. Before anything was sent to a model, names were replaced with pseudonyms, contact details and long numbers were masked, and messages matching high-sensitivity terms were withheld.
+The data comes from our own QQ chat export. Groups were selected by aggregate statistics without looking at content. Before anything was sent to a model, names were replaced with pseudonyms, contact details and long numbers were masked, and messages matching high-sensitivity terms were withheld.
 
 | | DEV-1 | DEV-2 |
 |---|---:|---:|
@@ -444,7 +444,7 @@ Based on this we wrote a **recall-policy layer v0**: without calling a model, it
 
 ### 12.3 Impression formation
 
-The user rejected "fading by time elapsed" and asked for the model to form impressions of events (D-044).
+We dropped "fading by time elapsed" and instead have the model form impressions of events (D-044).
 
 **Setup.** The chat is cut by day and read by the model in chronological order; for each segment the model knows only what came before and its own sense of "what this group is usually like"; it outputs the events in this segment that would leave an impression, their depth (deep / medium / shallow), the reason and the gist, and for deep impressions one or two original sentences. Time itself is not an input. Only the development groups were used.
 
