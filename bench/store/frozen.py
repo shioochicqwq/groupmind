@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import math
 import sqlite3
 import threading
@@ -24,15 +25,16 @@ from types import SimpleNamespace
 
 import numpy as np
 
-from bench import coloring
 from bench.embed import AliyunEmbedder
 from bench.frozen import FROZEN, cache_file
 from bench.memory_text import new_messages
 from bench.retrievers import frozen_pipeline as fp
 from bench.sanitize import Sanitizer
 from bench.schema import Message
-from bench.store.importer import colors_from_db, connect, messages_from_db
+from bench.store import online
+from bench.store.importer import connect
 
+log = logging.getLogger(__name__)
 RECORDED = "raw/embed_qa_B/K5V2B_rrf4_at1500.jsonl"   # the answer-level run of the frozen version
 
 
@@ -55,17 +57,20 @@ class StoreEmbedder(AliyunEmbedder):
 
     tries, first_delay, timeout = 2, 1.0, 15   # a question in a live turn does not wait long
 
-    def __init__(self, con: sqlite3.Connection, config: dict = FROZEN, cache_file: Path | None = None):
+    def __init__(self, con: sqlite3.Connection, config: dict = FROZEN, cache_file: Path | None = None, fetch: bool = False):
         e = config["embedding"]
         self.con, self.cache_file = con, cache_file
+        # fetch: missing document vectors are requested and kept in `fetched`, not stored (the colouring job after
+        # going live, bench/store/online.py, stores them with its run)
+        self.fetch, self.fetched = fetch, {}
         self.model, self.dim, self.asymmetric, self.instruct = e["model"], e["dim"], e["asymmetric"], e["instruct"]
         self.last_tokens: list[int] = []
         self.asked: dict[str, np.ndarray] = {}
         self.offline = False
         self.copied = self.spent = 0
 
-    def _documents(self, keys: list[str]) -> dict[str, np.ndarray]:
-        have, want = {}, sorted(set(keys))
+    def _documents(self, keys: list[str], texts) -> dict[str, np.ndarray]:
+        have, want = {k: self.fetched[k] for k in keys if k in self.fetched}, sorted(set(keys) - set(self.fetched))
         for i in range(0, len(want), 500):
             part = want[i : i + 500]
             for k, blob in self.con.execute(f"SELECT key, vector FROM embedding WHERE key IN ({','.join('?' * len(part))})", part):
@@ -79,6 +84,15 @@ class StoreEmbedder(AliyunEmbedder):
             self.copied += len(found)
             have.update(found)
             missing -= set(found)
+        if missing and self.fetch:
+            todo = sorted({(k, t) for k, t in zip(keys, texts) if k in missing})
+            for i in range(0, len(todo), self.batch):
+                part = todo[i : i + self.batch]
+                vectors = self._request([t for _, t in part], "RETRIEVAL_DOCUMENT")
+                self.spent += sum(self.last_tokens)
+                for (k, _), v in zip(part, vectors):
+                    have[k] = self.fetched[k] = np.array(v, dtype=np.float32)
+            missing = set()
         if missing:
             raise RuntimeError(f"{len(missing)} document vectors are not in the store (run `python -m bench.store.frozen vectors`)")
         return have
@@ -100,7 +114,7 @@ class StoreEmbedder(AliyunEmbedder):
 
     def embed(self, texts, task: str, role: str = "向量") -> np.ndarray:
         keys = [self._key(t, task) for t in texts]
-        have = self._questions(keys, texts) if task == "RETRIEVAL_QUERY" else self._documents(keys)
+        have = self._questions(keys, texts) if task == "RETRIEVAL_QUERY" else self._documents(keys, texts)
         arr = np.array([have[k] for k in keys], dtype=np.float32)
         norms = np.linalg.norm(arr, axis=1, keepdims=True)
         return arr / np.where(norms == 0, 1, norms)
@@ -133,52 +147,79 @@ class GroupMemory:
         return out
 
 
-def coloured(con: sqlite3.Connection, config: dict = FROZEN) -> list[str]:
-    return [r[0] for r in con.execute(
-        "SELECT c.code FROM color_run r JOIN chat c ON c.id = r.chat_id WHERE r.source_file = ? ORDER BY c.code", (config["colors"],))]
+def coloured(con: sqlite3.Connection, config: dict = FROZEN) -> dict[str, int]:
+    """Chat code -> its newest colour run, for chats with the frozen colours or colours made after going live."""
+    return dict(con.execute(
+        "SELECT c.code, max(r.id) FROM color_run r JOIN chat c ON c.id = r.chat_id WHERE r.source_file = ? OR r.source_file LIKE ? "
+        "GROUP BY c.code ORDER BY c.code", (config["colors"], online.ONLINE + "%")))
 
 
-def load(con: sqlite3.Connection, code: str, embedder, config: dict = FROZEN) -> GroupMemory:
+def load(con: sqlite3.Connection, code: str, embedder, config: dict = FROZEN, h: online.History | None = None) -> GroupMemory:
+    """The frozen retriever over a chat's coloured history (bench/store/online.py): the imported export with the frozen
+    colours, then the runs coloured after going live. Messages recorded later and not coloured yet are left out, so the
+    learned words and the batches stay the ones the frozen colours were made with. h: a history already built."""
+    from bench import chunking, tokenize
+    from bench.retrievers.bm25 import BM25
     from bench.run_abcd import color_indexes
-    from bench.run_s0 import sanitized
-    from bench.tasks.real_tasks import clean_messages
 
-    # The research corpus is the imported export. Messages the bot recorded later in the same group are
-    # left out, so the learned words and the batches stay the ones the frozen colours were made with.
-    imported = {old for (old,) in con.execute("SELECT old_id FROM id_map WHERE kind = 'message' AND chat_code = ?", (code,))}
-    raw = [m for m in messages_from_db(con, code) if m.msg_id in imported]
-    size, overlap = con.execute("SELECT r.batch_size, r.overlap FROM color_run r JOIN chat c ON c.id = r.chat_id "
-                                "WHERE c.code = ? AND r.source_file = ?", (code, config["colors"])).fetchone()
-    san, clean = Sanitizer(raw), clean_messages(raw)
-    messages = sanitized(clean, san)
-    colors = colors_from_db(con, code, config["colors"])
-    ctx = SimpleNamespace(messages=messages, by_id={m.msg_id: m for m in messages}, channel=code, **color_indexes(messages, colors))
-    retriever, _ = fp.build(ctx, config, embedder, colors, coloring.batches(clean, size, overlap))
-    covered = {i for c in colors for i in c["msg_ids"]}
-    return GroupMemory(code, retriever, san, {m.msg_id: m for m in clean}, max(ctx.by_id[i].timestamp for i in covered))
+    h = h or online.history(con, code, config)
+    if h.frozen:   # learned words from the first 70% of the export, as in the experiments
+        ctx = SimpleNamespace(**color_indexes(h.frozen_messages, h.frozen_colors))
+    else:
+        ctx = SimpleNamespace(tok=tokenize.make_jieba(()))
+    if not h.frozen or len(h.colors) != len(h.frozen_colors):
+        ctx.summary_blocks = chunking.from_colors(h.messages, h.colors, "summary")
+        ctx.raw_color_blocks = chunking.from_colors(h.messages, h.colors, "raw")
+        ctx.by_color = {b.block_id: b for b in ctx.raw_color_blocks}
+        ctx.summary_of = {b.block_id: b.index_text for b in ctx.summary_blocks}
+        ctx.summary_index, ctx.raw_index = BM25(ctx.summary_blocks, ctx.tok), BM25(ctx.raw_color_blocks, ctx.tok)
+    ctx.messages, ctx.by_id, ctx.channel = h.messages, {m.msg_id: m for m in h.messages}, code
+    retriever, _ = fp.build(ctx, config, embedder, h.colors, h.batches)
+    covered = {i for c in h.colors for i in c["msg_ids"]}
+    return GroupMemory(code, retriever, h.san, {m.msg_id: m for m in h.clean}, max(ctx.by_id[i].timestamp for i in covered))
 
 
 class FrozenMemory:
-    """Every coloured group's frozen retriever over one database file, built on first use."""
+    """Every coloured chat's frozen retriever over one database file, built on first use and rebuilt for a chat
+    when a new colour run of it shows up (colouring after going live)."""
 
     def __init__(self, db: Path, config: dict = FROZEN):
         self.db, self.config, self.lock = Path(db), config, threading.Lock()
         self.groups: dict[str, GroupMemory] | None = None
+        self.built: dict[str, int] = {}   # chat code -> the newest run its retriever includes
 
-    def load(self) -> dict[str, GroupMemory]:
+    def _build(self, con: sqlite3.Connection, emb, code: str) -> GroupMemory | None:
+        try:
+            return load(con, code, emb, self.config)
+        except (RuntimeError, KeyError, ValueError) as e:   # e.g. a vector the colouring job did not store
+            log.warning("recall for %s built from its frozen colours only: %s", code, e)
+        h = online.history(con, code, self.config, online=False)
+        return load(con, code, emb, self.config, h) if h.frozen else None
+
+    def load(self, refresh: bool = False) -> dict[str, GroupMemory]:
         with self.lock:
-            if self.groups is None:
-                con = sqlite3.connect(self.db, timeout=30)
-                try:
-                    emb = StoreEmbedder(con, self.config)
-                    self.groups = {code: load(con, code, emb, self.config) for code in coloured(con, self.config)}
-                finally:
-                    con.close()   # questions do not need it
+            if self.groups is not None and not refresh:
+                return self.groups
+            con = sqlite3.connect(self.db, timeout=30)
+            try:
+                emb = StoreEmbedder(con, self.config)
+                runs = coloured(con, self.config)
+                groups = dict(self.groups or {})
+                for code, newest in runs.items():
+                    if self.built.get(code) != newest:
+                        g = self._build(con, emb, code)
+                        if g is not None:
+                            groups[code] = g
+                        self.built[code] = newest
+                self.groups = groups
+            finally:
+                con.close()   # questions do not need it
             return self.groups
 
     def search(self, query: str, as_of: float = math.inf, only: tuple[str, ...] = (), exclude: tuple[str, ...] = ()) -> tuple[dict, bool]:
-        """Group code -> its frozen result. The flag is False when no question vector could be had and only the keyword routes ran."""
-        groups = [g for code, g in self.load().items() if code not in exclude and (not only or code in only)]
+        """Group code -> its frozen result. The flag is False when no question vector could be had and only the keyword routes ran.
+        Runs off the event loop, so it is also where chats coloured since the last call are rebuilt."""
+        groups = [g for code, g in self.load(refresh=True).items() if code not in exclude and (not only or code in only)]
         try:
             return {g.code: g.recall(query, as_of) for g in groups}, True
         except (RuntimeError, OSError):
@@ -191,7 +232,7 @@ def check(con: sqlite3.Connection, code: str, run_dir: Path, config: dict = FROZ
     emb = StoreEmbedder(con, config)
     emb.offline = True
     t0 = time.time()
-    g = load(con, code, emb, config)
+    g = load(con, code, emb, config, online.history(con, code, config, online=False))   # the recorded run knew no later colours
     built = round(time.time() - t0, 1)
     emb.asked = vectors_in_file(cache_file(config, run_dir), {emb._key(x["question"], "RETRIEVAL_QUERY") for x in rows})
     blocks = text = aliased = 0
@@ -218,7 +259,7 @@ def main() -> int:
             out[code] = check(con, code, Path(folder))
             continue
         emb = StoreEmbedder(con, FROZEN, cache_file(FROZEN, Path(folder)))
-        load(con, code, emb)
+        load(con, code, emb, FROZEN, online.history(con, code, FROZEN, online=False))
         out[code] = {"copied": emb.copied, "stored": con.execute("SELECT count(*) FROM embedding").fetchone()[0]}
     print(json.dumps(out, ensure_ascii=False))
     return 0 if all(r.get("passed", True) for r in out.values()) else 1

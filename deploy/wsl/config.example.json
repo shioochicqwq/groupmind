@@ -18,6 +18,7 @@
   "snapshot_file": "/home/bot/qqbot/data/memory_snapshot.md",
   "browser_executable": "/usr/bin/google-chrome",
   "xvfb_command": "Xvfb",
+  "colour_model": "gemini-3.8-flash-high",
   "video_model": "gemini-3.8-flash-high",
   "video_base_url": "https://<网关地址>",
   "ffmpeg": "/usr/bin/ffmpeg",

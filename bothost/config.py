@@ -24,6 +24,8 @@ class Config:
     sticker_base_url: str = ""
     lookup_model: str = ""                    # the web look-up helper's own route; empty: the same as the group's model
     lookup_base_url: str = ""
+    colour_model: str = ""                    # colouring after going live (D-047): the frozen colour model; empty: off, only counted
+    colour_base_url: str = ""                 # empty: the group's route
     listen_host: str = "127.0.0.1"
     listen_port: int = 6199
     mcp_url: str = ""                         # how the harness reaches this process; default: loopback
@@ -70,6 +72,7 @@ class Config:
     llm_api_key: str = ""
     lookup_api_key: str = ""
     sticker_api_key: str = ""
+    colour_api_key: str = ""
     search_api_key: str = ""                  # web look-up is offered only when this is set
     video_api_key: str = ""
 
@@ -86,6 +89,7 @@ def load(path: str | os.PathLike[str]) -> Config:
     cfg.llm_api_key = os.environ.get("QQBOT_LLM_API_KEY", "")
     cfg.lookup_api_key = os.environ.get("QQBOT_LOOKUP_API_KEY", "") or cfg.llm_api_key
     cfg.sticker_api_key = os.environ.get("QQBOT_STICKER_API_KEY", "") or cfg.llm_api_key
+    cfg.colour_api_key = os.environ.get("QQBOT_COLOUR_API_KEY", "") or cfg.llm_api_key
     cfg.search_api_key = os.environ.get("QQBOT_SEARCH_API_KEY", "")
     cfg.video_api_key = os.environ.get("QQBOT_VIDEO_API_KEY", "")
     cfg.browser_executable = os.environ.get("BROWSER_EXECUTABLE", cfg.browser_executable)

@@ -20,7 +20,7 @@ from starlette.responses import PlainTextResponse
 from starlette.routing import WebSocketRoute
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
-from . import handoff, lookup, people, sessions, stickers, tools, watch, web
+from . import colouring, handoff, lookup, people, sessions, stickers, tools, watch, web
 from .config import REPO, Config
 from .harness import Dsh, HarnessError, TurnTimeout
 from .onebot import Connection, Msg, SendUnknown, parse_group_message
@@ -320,6 +320,8 @@ class Host:
         self.lookups: lookup.Lookups | None = None   # made at the first look-up
         self.stickers = stickers.Stickers(cfg.data_dir / "stickers.json", cfg.sticker_model or cfg.model,
                                           cfg.sticker_base_url or cfg.llm_base_url, cfg.sticker_api_key) if cfg.stickers else None
+        self.colouring = colouring.Colouring(cfg.db_file, cfg.colour_model, cfg.colour_base_url or cfg.llm_base_url, cfg.colour_api_key,
+                                             cfg.data_dir / "usage.jsonl") if cfg.colour_model else None
         self.watcher = watch.Watcher(wait=None if cfg.handoff else watch.WAIT_S, model=cfg.video_model, base_url=cfg.video_base_url, api_key=cfg.video_api_key,
                                      ffmpeg=cfg.ffmpeg, ytdlp=cfg.ytdlp) if cfg.video_model else None
         # The harness's own compaction is replaced by one where the bot writes the note. Written first, so a patch from the
@@ -371,9 +373,11 @@ class Host:
         """The one place that hears a group's session lost context: a new session started, or the harness replaced
         the oldest part with a summary. Earlier talk is no longer in front of the model in full, so this is when the
         messages not coloured yet are due. Colouring reads them from the store, so nothing has to be handed over.
-        The colouring job itself is not attached yet; for now this reports how many messages are waiting."""
+        With a colour model set it starts in the background (bothost/colouring.py); either way the count is reported."""
         waiting = self.store.uncoloured(alias)
         log.info("context reset in %s (%s): %d messages not coloured yet", alias, "+".join(why), waiting)
+        if self.colouring is not None and waiting:
+            asyncio.create_task(self.colouring.start(alias, why))
         return waiting
 
     # ---- protocol side ----
